@@ -55,7 +55,7 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
 
   useEffect(() => () => stopPoll(), [stopPoll]);
 
-  const waitForRestartAndReload = useCallback(() => {
+  const waitForRestartAndReload = useCallback((targetVersion?: string) => {
     setRestarting(true);
     let sawDown = false;
     let ticks = 0;
@@ -63,15 +63,18 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
     pollRef.current = window.setInterval(async () => {
       ticks += 1;
       try {
-        const r = await fetch("/api/health", { cache: "no-store" });
-        if (r.ok && (sawDown || ticks >= 4)) {
-          stopPoll();
-          window.location.reload();
+        const r = await fetch("/api/version", { cache: "no-store" });
+        if (r.ok) {
+          const v = (await r.json()) as { version?: string };
+          if ((targetVersion && v.version === targetVersion) || (sawDown && ticks >= 2)) {
+            stopPoll();
+            window.location.reload();
+          }
         }
       } catch {
         sawDown = true;
       }
-      if (ticks >= 45) {
+      if (ticks >= 60) {
         stopPoll();
         setRestarting(false);
       }
@@ -109,7 +112,7 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
       });
       setResult(res);
       if (res.ok && res.restarting) {
-        waitForRestartAndReload();
+        waitForRestartAndReload(res.to_version);
       } else if (res.ok) {
         await check(true);
       }

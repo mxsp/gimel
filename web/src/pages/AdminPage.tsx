@@ -812,7 +812,7 @@ function UpdatesPanel() {
 
   useEffect(() => () => stopPoll(), [stopPoll]);
 
-  const waitForRestart = useCallback(() => {
+  const waitForRestart = useCallback((targetVersion?: string) => {
     setRestarting(true);
     let sawDown = false;
     let ticks = 0;
@@ -820,15 +820,18 @@ function UpdatesPanel() {
     pollRef.current = window.setInterval(async () => {
       ticks += 1;
       try {
-        const r = await fetch("/api/health", { cache: "no-store" });
-        if (r.ok && (sawDown || ticks >= 4)) {
-          stopPoll();
-          window.location.reload();
+        const r = await fetch("/api/version", { cache: "no-store" });
+        if (r.ok) {
+          const v = (await r.json()) as { version?: string };
+          if ((targetVersion && v.version === targetVersion) || (sawDown && ticks >= 2)) {
+            stopPoll();
+            window.location.reload();
+          }
         }
       } catch {
         sawDown = true;
       }
-      if (ticks >= 45) {
+      if (ticks >= 60) {
         stopPoll();
         setRestarting(false);
       }
@@ -861,7 +864,7 @@ function UpdatesPanel() {
       setResult(res);
       if (res.ok && res.restarting) {
         toastSuccess(`Update auf v${res.to_version} abgeschlossen — Gimel startet automatisch neu…`);
-        waitForRestart();
+        waitForRestart(res.to_version);
       } else if (res.ok) {
         toastSuccess(res.detail || "Update abgeschlossen.");
         check(true);
@@ -932,12 +935,16 @@ function UpdatesPanel() {
             <b className="mono">{info.latest_tag}</b>
             {info.published_at ? ` (${fmtDateTime(info.published_at)})` : ""}
           </p>
-          {info.matched_asset && (
+          {info.install_kind === "binary" && info.matched_asset ? (
             <p className="sub" style={{ marginTop: 4 }}>
               Paket: <span className="mono">{info.matched_asset.name}</span>{" "}
               ({(info.matched_asset.size / (1024 * 1024)).toFixed(1)} MB)
             </p>
-          )}
+          ) : info.install_kind === "git" && info.latest_tag ? (
+            <p className="sub" style={{ marginTop: 4 }}>
+              Aktualisierung per Git-Tag <span className="mono">{info.latest_tag}</span> (Checkout, Abhängigkeiten &amp; Build)
+            </p>
+          ) : null}
           <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Button
               intent="primary"

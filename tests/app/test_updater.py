@@ -82,3 +82,36 @@ def test_update_status_api_endpoint(client, monkeypatch):
     res = r_apply.json()
     assert res["ok"] is True
     assert res["restart_required"] is False
+
+
+def test_restart_command_handles_module_and_frozen(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(sys, "argv", ["/app/gimel/launcher.py", "--mode", "playground", "--port", "9000"])
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setitem(sys.modules, "__main__", SimpleNamespace(__spec__=SimpleNamespace(name="gimel.launcher")))
+    cmd = updater._restart_command()
+    assert cmd == [sys.executable, "-m", "gimel.launcher", "--mode", "playground", "--port", "9000"]
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    cmd_frozen = updater._restart_command()
+    assert cmd_frozen == [sys.executable, "--mode", "playground", "--port", "9000"]
+
+
+def test_clean_restart_env_strips_pyinstaller_meipass(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEI12345")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    monkeypatch.setenv("_MEIPASS2", "/tmp/_MEI12345")
+
+    env = updater._clean_restart_env()
+    assert "LD_LIBRARY_PATH" not in env
+    assert "_MEIPASS2" not in env
+    assert env["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/local/lib")
+    env2 = updater._clean_restart_env()
+    assert env2["LD_LIBRARY_PATH"] == "/usr/local/lib"

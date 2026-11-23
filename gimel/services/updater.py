@@ -433,7 +433,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
 
     remote_url = f"https://github.com/{info.repo}.git"
     fetch = subprocess.run(
-        ["git", "-C", str(root), "fetch", "--tags", remote_url, f"refs/tags/{tag}:refs/tags/{tag}"],
+        ["git", "-C", str(root), "fetch", "--tags", "--force", remote_url, f"+refs/tags/{tag}:refs/tags/{tag}"],
         capture_output=True,
         text=True,
         check=False,
@@ -448,7 +448,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
         )
 
     co = subprocess.run(
-        ["git", "-C", str(root), "checkout", tag],
+        ["git", "-C", str(root), "checkout", "--force", tag],
         capture_output=True,
         text=True,
         check=False,
@@ -478,15 +478,34 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
         )
 
     if rebuild_web and shutil.which("npm"):
+        npm_bin = shutil.which("npm") or "npm"
         for web_dir in (root / "web", root / "agentlab" / "web"):
-            if (web_dir / "package.json").is_file() and (web_dir / "node_modules").is_dir():
+            if not (web_dir / "package.json").is_file():
+                continue
+            if not (web_dir / "node_modules").is_dir():
                 subprocess.run(
-                    ["npm", "run", "build"],
+                    [npm_bin, "ci", "--no-audit", "--no-fund"],
                     cwd=str(web_dir),
                     capture_output=True,
                     text=True,
                     check=False,
                 )
+            if (web_dir / "node_modules").is_dir():
+                b = subprocess.run(
+                    [npm_bin, "run", "build"],
+                    cwd=str(web_dir),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if b.returncode != 0:
+                    return UpdateResult(
+                        ok=False,
+                        install_kind="git",
+                        from_version=APP_VERSION,
+                        to_version=tag.lstrip("v"),
+                        detail=f"Frontend-Build in {web_dir.name} fehlgeschlagen: {(b.stderr or b.stdout).strip()[-300:]}",
+                    )
 
     clear_cache()
     extra_note = " (Lokale Änderungen wurden sicher im Git-Stash gesichert.)" if stashed else ""
@@ -501,21 +520,52 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
 
 
 def _restart_command() -> list[str]:
+    """Reconstruct the exact command needed to re-launch the current Gimel process."""
     if getattr(sys, "frozen", False):
         return [sys.executable, *sys.argv[1:]]
+    main_mod = sys.modules.get("__main__")
+    spec = getattr(main_mod, "__spec__", None)
+    spec_name = getattr(spec, "name", "") if spec is not None else ""
+    if spec_name:
+        # Launched via `python -m gimel.launcher ...` or `python -m gimel.cli ...`
+        mod_name = spec_name[:-9] if spec_name.endswith(".__main__") else spec_name
+        return [sys.executable, "-m", mod_name, *sys.argv[1:]]
     argv0 = Path(sys.argv[0]) if sys.argv else Path("")
-    # If invoked via console entrypoint (e.g. .venv/bin/gimel serve ...), re-invoke it directly.
+    # Console script entrypoint (e.g. .venv/bin/gimel serve ...)
     if argv0.is_file() and argv0.name.startswith("gimel"):
         return [str(argv0), *sys.argv[1:]]
     return [sys.executable, *sys.argv]
 
 
+def _clean_restart_env() -> dict[str, str]:
+    """Return a subprocess environment safe for relaunching a frozen PyInstaller binary.
+
+    PyInstaller onefile executables mutate ``LD_LIBRARY_PATH`` / ``DYLD_LIBRARY_PATH``
+    to point at their ephemeral ``/tmp/_MEI*`` extraction directory. Inheriting that
+    into a detached child causes the newly exec'd binary to fail once the old process
+    cleans up ``_MEIPASS``.
+    """
+    env = dict(os.environ)
+    if getattr(sys, "frozen", False):
+        for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+            orig = env.get(f"{var}_ORIG")
+            if orig is not None:
+                env[var] = orig
+            else:
+                env.pop(var, None)
+        for var in ("_MEIPASS2", "TCL_LIBRARY", "TK_LIBRARY", "PYTHONHOME"):
+            env.pop(var, None)
+        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
 def schedule_restart(delay_seconds: float = 1.1) -> bool:
     """Gracefully stop this process and launch the updated Gimel process on the same args.
 
-    Spawns a tiny detached helper so the current server finishes sending its HTTP
-    response and frees the listening socket before the new process binds. On
-    Windows frozen binaries, the helper also swaps ``gimel.exe.new`` into place.
+    Uses a detached OS shell helper (``/bin/sh`` on POSIX, ``cmd /c`` on Windows)
+    so it works identically for both Python venvs and frozen PyInstaller binaries
+    (where ``sys.executable`` is ``gimel``, not ``python``). On Windows frozen
+    binaries, the helper also swaps ``gimel.exe.new`` into place before launch.
     """
     if detect_install_kind() == "docker":
         return False
@@ -523,57 +573,58 @@ def schedule_restart(delay_seconds: float = 1.1) -> bool:
     if not cmd:
         return False
     pid = os.getpid()
+    cwd = os.getcwd()
     is_win = platform.system().lower() == "windows"
     exe_path = Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
     staged = exe_path.with_suffix(exe_path.suffix + ".new") if exe_path else None
+    child_env = _clean_restart_env()
 
     def _trigger() -> None:
         time.sleep(max(0.4, delay_seconds))
         try:
-            if is_win and staged and staged.is_file() and exe_path:
-                # Batch helper waits for current pid to exit, swaps .new -> .exe, starts Gimel.
+            if is_win:
                 bat = Path(tempfile.gettempdir()) / f"gimel-restart-{pid}.cmd"
                 quoted = " ".join(f'"{c}"' for c in cmd)
+                swap_lines = ""
+                if staged and staged.is_file() and exe_path:
+                    swap_lines = (
+                        f'move /Y "{exe_path}" "{exe_path}.bak" >NUL 2>&1\r\n'
+                        f'move /Y "{staged}" "{exe_path}" >NUL 2>&1\r\n'
+                    )
                 bat.write_text(
                     "@echo off\r\n"
+                    f'cd /d "{cwd}"\r\n'
                     ":wait\r\n"
-                    f"tasklist /FI \"PID eq {pid}\" 2>NUL | find \"{pid}\" >NUL\r\n"
+                    f'tasklist /FI "PID eq {pid}" 2>NUL | find "{pid}" >NUL\r\n'
                     "if not errorlevel 1 (timeout /t 1 /nobreak >NUL & goto wait)\r\n"
-                    f"move /Y \"{exe_path}\" \"{exe_path}.bak\" >NUL 2>&1\r\n"
-                    f"move /Y \"{staged}\" \"{exe_path}\" >NUL 2>&1\r\n"
-                    f"start \"\" {quoted}\r\n"
-                    "del \"%~f0\" >NUL 2>&1\r\n",
+                    + swap_lines
+                    + f'start "" {quoted}\r\n'
+                    'del "%~f0" >NUL 2>&1\r\n',
                     encoding="utf-8",
                 )
                 subprocess.Popen(
                     ["cmd", "/c", str(bat)],
+                    env=child_env,
                     creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
             else:
-                helper = (
-                    "import os, subprocess, sys, time\n"
-                    f"pid = {pid}\n"
-                    "for _ in range(40):\n"
-                    "    try:\n"
-                    "        os.kill(pid, 0)\n"
-                    "        time.sleep(0.25)\n"
-                    "    except OSError:\n"
-                    "        break\n"
-                    "time.sleep(0.3)\n"
-                    f"subprocess.Popen({cmd!r}, cwd={os.getcwd()!r}, start_new_session=True, "
-                    "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                # Pure POSIX /bin/sh helper: works for BOTH frozen binaries and Python venvs.
+                sh_script = (
+                    f'pid="{pid}"; '
+                    'i=0; while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 60 ]; do sleep 0.2; i=$((i+1)); done; '
+                    'sleep 0.3; '
+                    'exec "$@"'
                 )
-                kwargs: dict = {
-                    "stdout": subprocess.DEVNULL,
-                    "stderr": subprocess.DEVNULL,
-                }
-                if is_win:
-                    kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-                else:
-                    kwargs["start_new_session"] = True
-                subprocess.Popen([sys.executable, "-c", helper], **kwargs)
+                subprocess.Popen(
+                    ["/bin/sh", "-c", sh_script, "_", *cmd],
+                    cwd=cwd,
+                    env=child_env,
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
         finally:
             try:
                 os.kill(pid, signal.SIGTERM)
