@@ -12,6 +12,7 @@ import BotSmiley from "../components/BotSmiley";
 import SidebarUpdateButton from "../components/SidebarUpdateButton";
 import ThemeSwitch from "../components/ThemeSwitch";
 import FloorPlan from "../components/FloorPlan";
+import HallCreatorDialog from "../components/HallCreatorDialog";
 import IsoFloorPlan from "../components/twin/IsoFloorPlan";
 import Inspector, { StationViewData } from "../components/twin/Inspector";
 import {
@@ -304,6 +305,7 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
   const [views, setViews] = useState<SavedView[]>([]);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
+  const [creatorOpen, setCreatorOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   /** Einbuchstaben-Kürzel lassen sich abschalten (WCAG 2.1.4). */
   const [keysOn, setKeysOn] = useState(() => readPref("gimel-studio-keys", ["1", "0"] as const, "1") === "1");
@@ -1009,6 +1011,16 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
             title="Aufbau ein-/ausblenden" onClick={() => setLeftOpen((v) => !v)} />
           <span className="studio-brand"><GimelMark size={22} /> <b>Twin Studio</b></span>
           <FloorPicker topo={topo} floorId={floorId} onPick={setFloorId} />
+          {admin && (
+            <Button
+              small
+              minimal
+              icon="office"
+              text="Neue Halle"
+              title="Hallen-Assistent öffnen: Neue Halle mit Form, Maßen, Gängen, Toren & Zonen anlegen"
+              onClick={() => setCreatorOpen(true)}
+            />
+          )}
           <ButtonGroup className="studio-seg" aria-label="Ansicht">
             <Button text="3D" active={view === "three"} aria-pressed={view === "three"} onClick={() => switchView("three")}
               disabled={gl === false} title={gl === false ? "Dieser Browser kann kein 3D (WebGL)" : "3D (1)"} />
@@ -1234,6 +1246,60 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
           startWalk(true);
         }}>
         {stage}
+        {admin && view !== "edit" && !loading && ((floor?.outline?.length ?? 0) < 3) && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "grid",
+              placeItems: "center",
+              background: "rgba(11, 15, 20, 0.72)",
+              backdropFilter: "blur(4px)",
+              zIndex: 15,
+              padding: 20,
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 520,
+                width: "100%",
+                background: "var(--g-surface, #161b22)",
+                border: "1px solid var(--g-line, #2a333f)",
+                borderRadius: 14,
+                padding: "24px 26px",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.5)",
+                display: "grid",
+                gap: 14,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Icon icon="office" size={22} />
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 18 }}>Erste Fabrikhalle einrichten</h2>
+                  <div style={{ fontSize: 12.5, opacity: 0.75, marginTop: 2 }}>
+                    Noch kein Hallenumriss hinterlegt — erstellen Sie Ihre Halle in wenigen Sekunden.
+                  </div>
+                </div>
+              </div>
+              <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5, opacity: 0.9 }}>
+                Mit dem <b>Hallen-Assistenten</b> wählen Sie Grundform (Rechteck, L-, U- oder T-Halle), exakte Maße, Transportgänge, Tore, Funktionszonen und optionale Start-Maschinen mit Live-Vorschau.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+                <Button
+                  intent="primary"
+                  icon="office"
+                  text="Hallen-Assistent starten"
+                  onClick={() => setCreatorOpen(true)}
+                />
+                <Button
+                  icon="edit"
+                  text="Im 2D-Editor frei zeichnen"
+                  onClick={() => switchView("edit")}
+                />
+              </div>
+            </div>
+          </div>
+        )}
         {view === "three" && gl !== false && !walk && !kiosk && (
           <div className="studio-cam" role="group" aria-label="Kamera">
             <Button small icon="undo" aria-label="Kamera nach links drehen" title="Nach links drehen" onClick={() => threeRef.current?.rotate(-45)} />
@@ -1374,6 +1440,19 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
         </footer>
       )}
 
+      <HallCreatorDialog
+        isOpen={creatorOpen}
+        onClose={() => setCreatorOpen(false)}
+        topo={topo}
+        currentFloor={floor}
+        onApplied={async (savedFloor) => {
+          setLoadedFloor(savedFloor);
+          setOtherFloors((m) => ({ ...m, [savedFloor.id]: savedFloor }));
+          await site.reload();
+          if (savedFloor.id) setFloorId(savedFloor.id);
+          await load(true);
+        }}
+      />
       <Dialog isOpen={saveOpen} onClose={() => setSaveOpen(false)} title="Ansicht speichern" icon="camera">
         <form onSubmit={(e) => { e.preventDefault(); saveView(); }}>
           <DialogBody>

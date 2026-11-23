@@ -22,6 +22,7 @@ import FloorSwitcher from "../components/FloorSwitcher";
 import ModelChoice from "../components/twin/ModelChoice";
 import SitesDialog from "../components/SitesDialog";
 import LevelDialog from "../components/LevelDialog";
+import HallCreatorDialog, { GeneratedHallPlan } from "../components/HallCreatorDialog";
 import { allFloors, floorLabel, stationFloor, useTopology } from "../sites";
 import { usePhone } from "../usePhone";
 
@@ -103,6 +104,7 @@ export default function FloorAdmin({
   /** Vorschlag des Pfadfinders — erst übernommen, wenn der Admin es sagt. */
   const [proposal, setProposal] = useState<{ aisles: Aisles; lines: [[number, number], [number, number]][]; done: string[]; failed: string[] } | null>(null);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [creatorOpen, setCreatorOpen] = useState(false);
   const [ioOpen, setIoOpen] = useState(false);
   const [ioText, setIoText] = useState("");
   const [dxfOpen, setDxfOpen] = useState(false);
@@ -518,7 +520,9 @@ export default function FloorAdmin({
   const dirty = useMemo(
     () => JSON.stringify(saved) !== JSON.stringify({ ...saved, ...floor }), [saved, floor]);
 
-  const hasUnsavedDraft = (layer === "zone" || layer === "obstacle") && draft.length > 0;
+  const hasValidDraft = (layer === "outline" || layer === "zone" || layer === "obstacle")
+    && draft.length >= 3 && !polygonSelfIntersects(draft);
+  const hasUnsavedDraft = (layer === "outline" || layer === "zone" || layer === "obstacle") && draft.length > 0;
   const hasUnsaved = dirty || hasUnsavedDraft;
   useEffect(() => {
     onDirtyChange?.(hasUnsaved);
@@ -528,19 +532,85 @@ export default function FloorAdmin({
   const saveFloor = async () => {
     setBusy(true);
     try {
+      let nextOutline = floor.outline;
+      let nextZones = floor.zones;
+      let nextObstacles = floor.obstacles;
+
+      // Automatisch offenen gültigen Entwurf beim Klick auf „Halle speichern“ mit übernehmen,
+      // damit niemand durch das Zweistufen-Übernehmen seine Zeichnung verliert!
+      if (hasValidDraft) {
+        if (layer === "outline") {
+          nextOutline = draft;
+        } else if (layer === "zone") {
+          const kindMeta = ZONE_KINDS.find((k) => k.id === draftKind);
+          const z: Zone = {
+            name: draftName.trim() || kindMeta?.label || "Zone",
+            kind: draftKind,
+            colour: kindMeta?.colour ?? "#8e5cb8",
+            points: draft,
+          };
+          nextZones = [...(floor.zones ?? [])];
+          if (zoneIdx >= 0) nextZones[zoneIdx] = z; else nextZones.push(z);
+        } else if (layer === "obstacle") {
+          const presetMeta = STRUCTURAL_PRESETS.find((p) => p.id === draftObstacleKind);
+          const o: Obstacle = {
+            name: draftName.trim() || presetMeta?.name || "Hindernis",
+            points: draft,
+            ...(draftObstacleKind && draftObstacleKind !== "obstacle" ? { kind: draftObstacleKind } : {}),
+            ...(draftHeightM != null && Number.isFinite(draftHeightM) && draftHeightM > 0
+              ? { height_m: Math.round(draftHeightM * 100) / 100 } : {}),
+          };
+          nextObstacles = [...(floor.obstacles ?? [])];
+          if (obstacleIdx >= 0) nextObstacles[obstacleIdx] = o; else nextObstacles.push(o);
+        }
+        setDraft([]);
+        setDraftClosed(false);
+        setZoneIdx(-1);
+        setObstacleIdx(-1);
+        setMode("select");
+      }
+
+      // Falls in Production noch kein Standort / keine Halle existiert, automatisch anlegen.
+      let hallId = floor.hall_id ?? null;
+      let floorIdToSave = floor.id && floor.id > 0 ? floor.id : null;
+      const hasAnyHall = (site.topo?.sites?.some((s) => s.halls.length > 0) || (site.topo?.unsited_halls?.length ?? 0) > 0) ?? false;
+      if (!hallId && !hasAnyHall) {
+        try {
+          let siteId = site.topo?.default_site_id ?? site.topo?.sites?.[0]?.id ?? null;
+          if (!siteId) {
+            const createdSite = await api<{ id: number }>("/api/factory/sites", {
+              method: "POST",
+              body: JSON.stringify({ name: "Hauptwerk" }),
+            });
+            siteId = createdSite.id;
+          }
+          const createdHall = await api<{ id: number; floors?: { id: number; level: number }[] }>("/api/factory/halls", {
+            method: "POST",
+            body: JSON.stringify({ site_id: siteId, name: floor.name || "Halle 1" }),
+          });
+          hallId = createdHall.id;
+          const ground = createdHall.floors?.find((f) => f.level === 0) ?? createdHall.floors?.[0];
+          if (ground?.id) floorIdToSave = ground.id;
+        } catch {
+          /* Fallback auf Standard-Floor-Endpunkt */
+        }
+      }
+
       const body = {
-        name: floor.name, outline: floor.outline, zones: floor.zones,
-        obstacles: floor.obstacles, doors: floor.doors, aisles: floor.aisles,
+        name: floor.name || "Halle 1", outline: nextOutline, zones: nextZones,
+        obstacles: nextObstacles, doors: floor.doors, aisles: floor.aisles,
         scale: floor.scale, grid: floor.grid, snap: floor.snap, bg: floor.bg,
-        hall_id: floor.hall_id ?? null, level: floor.level ?? 0, level_name: floor.level_name ?? "",
+        hall_id: hallId, level: floor.level ?? 0, level_name: floor.level_name || "EG",
         elevation_m: floor.elevation_m ?? 0, height_m: floor.height_m ?? 6,
       };
-      const q = floor.id ? `?floor_id=${floor.id}` : "";
+      const q = floorIdToSave ? `?floor_id=${floorIdToSave}` : "";
       const s = await api<Floor>(`/api/factory/floor${q}`, { method: "PUT", body: JSON.stringify(body) });
       const merged: Floor = { ...EMPTY_FLOOR, ...s, aisles: s.aisles ?? { nodes: [], edges: [] } };
       setSaved(merged);
       setFloor(merged);
       setHist({ past: [], future: [] });
+      await site.reload();
+      if (merged.id && merged.id !== site.floorId) site.setFloorId(merged.id);
       onSaved?.(merged);
       toastSuccess("Halle gespeichert.");
     } catch (e: unknown) {
@@ -782,6 +852,16 @@ export default function FloorAdmin({
         e.preventDefault(); redo(); return;
       }
       if (e.key === "Escape") { finishDrawing(); return; }
+      if (e.key === "Enter" && mode !== "select" && mode !== "measure" && polygonLayer && draft.length >= 3) {
+        e.preventDefault();
+        finishDrawing();
+        return;
+      }
+      if ((e.key === "Backspace" || e.key === "Delete") && mode !== "select" && mode !== "measure" && polygonLayer && !draftClosed && draft.length > 0) {
+        e.preventDefault();
+        setDraft((d) => d.slice(0, -1));
+        return;
+      }
       // Aktiven Polygon-Entwurf (z. B. Innenwand, Raumbox) per Tastatur verschieben/drehen.
       if (mode !== "select" && mode !== "measure" && polygonLayer && draft.length >= 3) {
         const step = e.shiftKey ? 1 : 0.25;
@@ -1007,9 +1087,9 @@ export default function FloorAdmin({
             }, null, 2));
             setIoOpen(true);
           }} />
-          <Button small intent={dirty ? "primary" : "none"} icon="floppy-disk" loading={busy}
-            disabled={!dirty} text={dirty ? "Halle speichern" : "gespeichert"}
-            aria-label={dirty ? "Halle speichern" : "gespeichert"} onClick={saveFloor} />
+          <Button small intent={dirty || hasValidDraft ? "primary" : "none"} icon="floppy-disk" loading={busy}
+            disabled={!dirty && !hasValidDraft} text={dirty || hasValidDraft ? "Halle speichern" : "gespeichert"}
+            aria-label={dirty || hasValidDraft ? "Halle speichern" : "gespeichert"} onClick={saveFloor} />
         </div>}
       </div>
 
@@ -1042,6 +1122,8 @@ export default function FloorAdmin({
             ))}
           </ButtonGroup>
           <span className="sep" />
+          <Button small intent="primary" icon="office" text="Hallen-Assistent" onClick={() => setCreatorOpen(true)}
+            title="Komplette Halle mit Form, Maßen, Gängen, Toren, Zonen & Stationen erstellen" />
           <Button small icon="layout-grid" text="Hallenvorlage" onClick={() => setTemplateOpen(true)} />
           <Button small icon="import" text="DXF" onClick={() => setDxfOpen(true)}
             title="Umriss aus einer CAD-Zeichnung (ASCII-DXF) übernehmen" />
@@ -1076,6 +1158,28 @@ export default function FloorAdmin({
              onContextMenu={(e) => { if (mode !== "select" || draft.length || pathDraft) { e.preventDefault(); finishDrawing(); } }}>
           {/* Prüfleiste: was an dieser Halle noch nicht stimmt. Sichtbar und nicht
               im Log, weil ein unsichtbarer Mangel gepflegt wird wie keiner. */}
+          {/* Schnellstart-Leiste, wenn noch kein Hallenumriss gezeichnet ist */}
+          {(floor.outline?.length ?? 0) < 3 && draft.length < 3 && (
+            <Callout intent="primary" icon="office" style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <strong>Neue Halle einrichten</strong> — Starten Sie mit dem Hallen-Assistenten (Form, Maße, Gangnetz, Tore &amp; Zonen in einem Schritt) oder zeichnen Sie direkt auf dem Plan.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Button small intent="primary" icon="office" text="Hallen-Assistent öffnen" onClick={() => setCreatorOpen(true)} />
+                  <Button small icon="widget" text="Rechteck 40 × 24 m setzen" onClick={() => {
+                    const pts = templateRect(40, 24);
+                    mutate({ outline: pts, aisles: suggestAisles(pts) });
+                    setDraft(pts); setDraftClosed(true); setLayer("outline"); setMode("draw");
+                  }} />
+                  <Button small icon="polygon-filter" text="Frei zeichnen" onClick={() => {
+                    setLayer("outline"); setMode("draw"); setDraft([]); setDraftClosed(false);
+                  }} />
+                  <Button small icon="import" text="DXF importieren" onClick={() => setDxfOpen(true)} />
+                </div>
+              </div>
+            </Callout>
+          )}
           <FloorIssues floor={floor} saved={saved} stations={stations} />
 
           <FloorPlan
@@ -1100,8 +1204,21 @@ export default function FloorAdmin({
             })}
             onDraftInsert={(after, p) => setDraft((d) => [...d.slice(0, after + 1), p, ...d.slice(after + 1)])}
             onDraftFinish={finishDrawing}
+            onDraftStartNew={() => { setDraft([]); setDraftClosed(false); setMode("draw"); }}
             rectMode={!phone && mode === "rect"}
-            onDraftRect={(pts) => { setDraft(pts); setDraftClosed(true); setMode("draw"); }}
+            onDraftRect={(pts) => {
+              if (layer === "outline") {
+                mutate({ outline: pts });
+                setDraft(pts);
+                setDraftClosed(true);
+                setMode("draw");
+                toastSuccess(`Rechteck-Umriss (${polygonArea(pts).toFixed(0)} m²) gesetzt — Ecken ziehen oder direkt „Halle speichern“.`);
+              } else {
+                setDraft(pts);
+                setDraftClosed(true);
+                setMode("draw");
+              }
+            }}
             editingObstacleIdx={layer === "obstacle" && mode !== "select" ? obstacleIdx : -1}
             editingZoneIdx={layer === "zone" && mode !== "select" ? zoneIdx : -1}
             onObstacleClick={editObstacle}
@@ -1593,6 +1710,41 @@ export default function FloorAdmin({
           onCreate={async (st, file) => { const made = await createStation(st, file); if (made) setNewType(null); }} />
       )}
 
+      <HallCreatorDialog
+        isOpen={creatorOpen}
+        onClose={() => setCreatorOpen(false)}
+        topo={site.topo}
+        currentFloor={floor}
+        onApplied={async (savedFloor) => {
+          setSaved(savedFloor);
+          setFloor(savedFloor);
+          setDraft([]);
+          setDraftClosed(false);
+          setHist({ past: [], future: [] });
+          await site.reload();
+          if (savedFloor.id) site.setFloorId(savedFloor.id);
+          await load();
+          onSaved?.(savedFloor);
+        }}
+        onOpenDraftInEditor={(plan: GeneratedHallPlan) => {
+          mutate({
+            name: plan.name,
+            height_m: plan.height_m,
+            grid: plan.grid,
+            snap: plan.snap,
+            outline: plan.outline,
+            zones: plan.zones,
+            obstacles: plan.obstacles,
+            doors: plan.doors,
+            aisles: plan.aisles,
+          });
+          setLayer("outline");
+          setMode("draw");
+          setDraft(plan.outline);
+          setDraftClosed(true);
+          toastSuccess("Hallenentwurf geladen — Ecken anpassen und „Halle speichern“ klicken.");
+        }}
+      />
       <SitesDialog isOpen={sitesOpen} onClose={() => setSitesOpen(false)} topo={site.topo} current={site.current}
         floor={floor} onChanged={async (fid) => { await site.reload(); if (fid) site.setFloorId(fid); }} />
       <LevelDialog isOpen={levelOpen} hall={site.current?.hall ?? null}

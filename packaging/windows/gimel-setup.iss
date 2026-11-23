@@ -5,7 +5,7 @@
 ; optional Private-LAN Windows Firewall rule, uninstaller, and automatic Desktop App launch.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.8"
+  #define AppVersion "0.2.9"
 #endif
 
 [Setup]

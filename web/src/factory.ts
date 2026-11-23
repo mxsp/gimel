@@ -990,7 +990,7 @@ export function sceneBounds(floor: Floor, stations: Station[]): { x: number; y: 
     xs.push(s.x - s.w / 2, s.x + s.w / 2);
     ys.push(s.y - s.h / 2, s.y + s.h / 2);
   }
-  if (!xs.length) return { x: -1, y: -1, w: 22, h: 14 };
+  if (!xs.length) return { x: -2, y: -2, w: 44, h: 28 };
   const pad = 1.5;
   const minX = Math.min(...xs) - pad;
   const minY = Math.min(...ys) - pad;
