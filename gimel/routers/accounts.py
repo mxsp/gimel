@@ -1,4 +1,4 @@
-"""Gimel Account Manager — simple username + password accounts for localnet operation.
+"""Gimel Account Manager — proper admin account management (username + password).
 
 Stores the login identifier in ``User.email`` so existing sessions, audit logs,
 and database schemas work without migrations. Accepts plain usernames (e.g.
@@ -7,18 +7,21 @@ and database schemas work without migrations. Accepts plain usernames (e.g.
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_
+from sqlalchemy import func, or_
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..models import AuditLog, Order, Role, User
+from ..localnet import local_lan_ips
+from ..models import AuditLog, AuthSession, Order, Role, User
 from ..schemas import Token
 from ..security import (
     create_access_token,
@@ -29,7 +32,9 @@ from ..security import (
     require_admin,
     verify_password,
 )
+from ..services import identity
 from ..services.mfa import revoke_other_sessions
+from ..version import APP_VERSION
 from .auth import _create_session, _set_refresh_cookie, check_password_strength
 from .users import assert_not_last_admin
 
@@ -65,6 +70,23 @@ def _is_locked(user: User) -> bool:
     return False
 
 
+def _active_session_counts(db: Session, user_ids: list[int]) -> dict[int, int]:
+    if not user_ids:
+        return {}
+    now = datetime.now(timezone.utc)
+    rows = (
+        db.query(AuthSession.user_id, func.count(AuthSession.id))
+        .filter(
+            AuthSession.user_id.in_(user_ids),
+            AuthSession.revoked_at.is_(None),
+            AuthSession.expires_at > now,
+        )
+        .group_by(AuthSession.user_id)
+        .all()
+    )
+    return {int(uid): int(cnt) for uid, cnt in rows}
+
+
 class AccountOut(BaseModel):
     id: int
     username: str
@@ -74,9 +96,39 @@ class AccountOut(BaseModel):
     last_login: Optional[datetime] = None
     locked: bool = False
     failed_login_count: int = 0
+    active_sessions: int = 0
 
 
-def _to_out(user: User) -> AccountOut:
+class AccountSessionOut(BaseModel):
+    id: int
+    ip: str
+    user_agent: str
+    created_at: datetime
+    expires_at: datetime
+    current: bool = False
+
+
+class AccountAuditOut(BaseModel):
+    id: int
+    at: datetime
+    actor: str
+    action: str
+    detail: dict = Field(default_factory=dict)
+
+
+class AccountSummaryOut(BaseModel):
+    total: int
+    admins: int
+    staff: int
+    workers: int
+    customers: int
+    active: int
+    inactive: int
+    locked: int
+    active_sessions: int
+
+
+def _to_out(user: User, active_sessions: int = 0) -> AccountOut:
     return AccountOut(
         id=user.id,
         username=user.email,
@@ -86,6 +138,7 @@ def _to_out(user: User) -> AccountOut:
         last_login=user.last_login,
         locked=_is_locked(user),
         failed_login_count=int(user.failed_login_count or 0),
+        active_sessions=active_sessions,
     )
 
 
@@ -98,6 +151,7 @@ class AccountCreate(BaseModel):
 class AccountSetup(BaseModel):
     username: str = Field(min_length=2, max_length=120)
     password: str = Field(min_length=8, max_length=200)
+    plant_name: str = Field(default="", max_length=160)
 
 
 class AccountUpdate(BaseModel):
@@ -116,14 +170,23 @@ class OwnPasswordChange(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# First-run setup (only open when 0 accounts exist in the database)
+# First-run setup wizard (only open when 0 accounts exist in the database)
 # ---------------------------------------------------------------------------
 @router.get("/setup-status")
-def setup_status(db: Annotated[Session, Depends(get_db)]) -> dict:
+def setup_status(request: Request, db: Annotated[Session, Depends(get_db)]) -> dict:
     s = get_settings()
+    try:
+        db_backend = make_url(s.database_url).get_backend_name()
+    except Exception:  # noqa: BLE001
+        db_backend = "sqlite"
+    port = request.url.port or (8041 if s.is_production() else 8040)
     return {
         "needs_setup": db.query(User).count() == 0,
         "localnet_only": s.localnet_only,
+        "mode": "production" if s.is_production() else os.environ.get("GIMEL_MODE", "playground"),
+        "db_backend": db_backend,
+        "version": APP_VERSION,
+        "lan_urls": [f"http://{ip}:{port}/app" for ip in local_lan_ips()],
     }
 
 
@@ -150,13 +213,16 @@ def setup_first_admin(
     )
     db.add(user)
     db.flush()
+    plant_name = (body.plant_name or "").strip()
+    if plant_name and identity.editable():
+        identity.save(db, {"name": plant_name}, actor=username)
     db.add(
         AuditLog(
             actor=username,
             action="account_setup_admin",
             entity="user",
             entity_id=str(user.id),
-            detail={"username": username, "role": Role.admin.value},
+            detail={"username": username, "role": Role.admin.value, "plant_name": plant_name},
         )
     )
     db.commit()
@@ -204,29 +270,57 @@ def change_own_password(
 
 
 # ---------------------------------------------------------------------------
-# Admin Account Manager CRUD
+# Admin Account Manager Summary & CRUD
 # ---------------------------------------------------------------------------
+@router.get("/summary", response_model=AccountSummaryOut, dependencies=[Depends(require_admin)])
+def accounts_summary(db: Annotated[Session, Depends(get_db)]) -> AccountSummaryOut:
+    users = db.query(User).all()
+    team = [u for u in users if u.role != Role.customer]
+    now = datetime.now(timezone.utc)
+    active_sessions = (
+        db.query(func.count(AuthSession.id))
+        .filter(AuthSession.revoked_at.is_(None), AuthSession.expires_at > now)
+        .scalar()
+        or 0
+    )
+    return AccountSummaryOut(
+        total=len(team),
+        admins=sum(1 for u in team if u.role == Role.admin and u.active),
+        staff=sum(1 for u in team if u.role == Role.staff and u.active),
+        workers=sum(1 for u in team if u.role == Role.worker and u.active),
+        customers=sum(1 for u in users if u.role == Role.customer),
+        active=sum(1 for u in team if u.active),
+        inactive=sum(1 for u in team if not u.active),
+        locked=sum(1 for u in team if _is_locked(u)),
+        active_sessions=int(active_sessions),
+    )
+
+
 @router.get("", response_model=list[AccountOut], dependencies=[Depends(require_admin)])
 def list_accounts(
     db: Annotated[Session, Depends(get_db)],
     q: Optional[str] = None,
     role: Optional[Role] = None,
     active: Optional[bool] = None,
+    include_customers: bool = False,
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> list[AccountOut]:
     query = db.query(User)
+    if role is not None:
+        query = query.filter(User.role == role)
+    elif not include_customers:
+        query = query.filter(User.role != Role.customer)
     if q and q.strip():
         esc = q.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like = f"%{esc}%"
         query = query.filter(
             or_(User.email.ilike(like, escape="\\"), User.name.ilike(like, escape="\\"))
         )
-    if role is not None:
-        query = query.filter(User.role == role)
     if active is not None:
         query = query.filter(User.active.is_(active))
     rows = query.order_by(User.email, User.id).limit(limit).all()
-    return [_to_out(u) for u in rows]
+    counts = _active_session_counts(db, [u.id for u in rows])
+    return [_to_out(u, counts.get(u.id, 0)) for u in rows]
 
 
 @router.post(
@@ -272,7 +366,7 @@ def create_account(
     )
     db.commit()
     db.refresh(user)
-    return _to_out(user)
+    return _to_out(user, 0)
 
 
 @router.patch("/{user_id}", response_model=AccountOut, dependencies=[Depends(require_admin)])
@@ -327,7 +421,8 @@ def update_account(
         user.active = body.active
 
     if not changed:
-        return _to_out(user)
+        counts = _active_session_counts(db, [user.id])
+        return _to_out(user, counts.get(user.id, 0))
 
     if revoke_sessions:
         revoke_other_sessions(db, user, keep_id=None)
@@ -343,7 +438,94 @@ def update_account(
     )
     db.commit()
     db.refresh(user)
-    return _to_out(user)
+    counts = _active_session_counts(db, [user.id])
+    return _to_out(user, counts.get(user.id, 0))
+
+
+@router.get("/{user_id}/sessions", response_model=list[AccountSessionOut], dependencies=[Depends(require_admin)])
+def list_account_sessions(
+    user_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    sid: Annotated[int | None, Depends(current_session_id)],
+) -> list[AccountSessionOut]:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Konto nicht gefunden.")
+    now = datetime.now(timezone.utc)
+    rows = (
+        db.query(AuthSession)
+        .filter(
+            AuthSession.user_id == user.id,
+            AuthSession.revoked_at.is_(None),
+            AuthSession.expires_at > now,
+        )
+        .order_by(AuthSession.created_at.desc())
+        .all()
+    )
+    return [
+        AccountSessionOut(
+            id=s.id,
+            ip=s.ip or "",
+            user_agent=s.user_agent or "",
+            created_at=s.created_at,
+            expires_at=s.expires_at,
+            current=(sid is not None and s.id == sid),
+        )
+        for s in rows
+    ]
+
+
+@router.post("/{user_id}/logout-all", dependencies=[Depends(require_admin)])
+def logout_all_sessions(
+    user_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    actor: Annotated[User, Depends(current_user)],
+    sid: Annotated[int | None, Depends(current_session_id)],
+) -> dict:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Konto nicht gefunden.")
+    keep = sid if user.id == actor.id else None
+    revoked = revoke_other_sessions(db, user, keep_id=keep)
+    db.add(
+        AuditLog(
+            actor=actor.email,
+            action="account_logout_all",
+            entity="user",
+            entity_id=str(user.id),
+            detail={"revoked": revoked, "kept_current": keep is not None},
+        )
+    )
+    db.commit()
+    return {"revoked": revoked}
+
+
+@router.get("/{user_id}/audit", response_model=list[AccountAuditOut], dependencies=[Depends(require_admin)])
+def account_audit(
+    user_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[AccountAuditOut]:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Konto nicht gefunden.")
+    rows = (
+        db.query(AuditLog)
+        .filter(AuditLog.entity == "user", AuditLog.entity_id == str(user.id))
+        .order_by(AuditLog.at.desc(), AuditLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        AccountAuditOut(
+            id=r.id,
+            at=r.at,
+            actor=r.actor,
+            action=r.action,
+            detail=r.detail if isinstance(r.detail, dict) else {},
+        )
+        for r in rows
+    ]
 
 
 @router.post(
@@ -401,7 +583,8 @@ def unlock_account(
     )
     db.commit()
     db.refresh(user)
-    return _to_out(user)
+    counts = _active_session_counts(db, [user.id])
+    return _to_out(user, counts.get(user.id, 0))
 
 
 @router.delete("/{user_id}", dependencies=[Depends(require_admin)])

@@ -32,10 +32,38 @@ def test_username_only_account_lifecycle(client):
     token = r_login.json()["access_token"]
     user_headers = {"Authorization": f"Bearer {token}"}
 
-    # List accounts as admin
+    # List accounts as admin (team-only default excludes customer accounts)
     r_list = client.get("/api/accounts", params={"q": "schicht"})
     assert r_list.status_code == 200
-    assert any(row["username"] == "schicht1" for row in r_list.json())
+    rows = r_list.json()
+    assert any(row["username"] == "schicht1" and row["active_sessions"] >= 1 for row in rows)
+    assert all(row["role"] != "customer" for row in rows)
+
+    # Summary KPIs
+    r_sum = client.get("/api/accounts/summary")
+    assert r_sum.status_code == 200
+    sdata = r_sum.json()
+    assert sdata["total"] >= 2 and sdata["admins"] >= 1 and sdata["active_sessions"] >= 1
+
+    # Inspect sessions & force logout all devices
+    r_sess = client.get(f"/api/accounts/{uid}/sessions")
+    assert r_sess.status_code == 200
+    assert len(r_sess.json()) >= 1
+    r_out = client.post(f"/api/accounts/{uid}/logout-all")
+    assert r_out.status_code == 200
+    assert r_out.json()["revoked"] >= 1
+    assert client.get("/api/auth/me", headers=user_headers).status_code == 401
+
+    # Audit log for account
+    r_aud = client.get(f"/api/accounts/{uid}/audit")
+    assert r_aud.status_code == 200
+    actions = {row["action"] for row in r_aud.json()}
+    assert "account_create" in actions and "account_logout_all" in actions
+
+    # Sign back in for self-service password test
+    r_login2 = _login(client, "schicht1", "Werkbank-42!")
+    assert r_login2.status_code == 200
+    user_headers = {"Authorization": f"Bearer {r_login2.json()['access_token']}"}
 
     # Self-service password change
     r_self = client.post(

@@ -714,6 +714,9 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
               position="top"
               content={
                 <Menu>
+                  {(user.role === "admin" || user.adminWork) && (
+                    <MenuItem icon="people" text="Konten verwalten" href="/app/#/benutzer" />
+                  )}
                   <MenuItem icon="tint" text="Design wechseln" onClick={toggleTheme} />
                   <MenuItem icon="chat" text="Assistent-Popup" onClick={openDrawer} />
                   <MenuItem icon="cog" text="Einstellungen" onClick={() => setView("settings")} />

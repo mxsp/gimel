@@ -7,6 +7,7 @@ import { api, fmtDateTime } from "../api";
 import { toastError, toastSuccess } from "../toast";
 import { FilterGroup, FilterPopover, FilterTag, HintDetails, InfoHint, KpiStrip, PageFrame, Toolbar } from "../ui";
 import SammellaufPanel from "./SammellaufPanel";
+import { AccountManagerPanel } from "./Users";
 import AgentSettings from "@agentlab/AgentSettings";
 import { installAgentTransport } from "../components/agent/transport";
 import "../components/agent/agent.css";
@@ -45,6 +46,7 @@ export default function AdminPage() {
     <PageFrame title="Admin">
       <Tabs id="admin" selectedTabId={tab} onChange={(t) => setTab(String(t))} large renderActiveTabPanelOnly>
         <Tab id="kennzahlen" title="Kennzahlen" panel={<StatsPanel />} />
+        <Tab id="konten" title="Konten" panel={<AccountManagerPanel />} />
         <Tab id="sammellauf" title="Sammellauf" panel={<SammellaufPanel />} />
         <Tab id="parameter" title="Betriebsparameter" panel={<SettingsPanel />} />
         <Tab id="agent" title="Assistent & Sandbox" panel={<AgentAdminPanel />} />

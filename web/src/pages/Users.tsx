@@ -1,15 +1,19 @@
 import {
   Alert,
   Button,
+  Callout,
   Dialog,
   DialogBody,
   DialogFooter,
+  Drawer,
   FormGroup,
   HTMLSelect,
   HTMLTable,
   InputGroup,
   Spinner,
   Switch,
+  Tab,
+  Tabs,
   Tag,
 } from "@blueprintjs/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,11 +21,12 @@ import { api, fmtDateTime, getUser } from "../api";
 import NonIdealState from "../components/NonIdealState";
 import { plural } from "../plural";
 import { toastError, toastSuccess } from "../toast";
-import { PageFrame, Toolbar } from "../ui";
+import { KpiStrip, PageFrame, Toolbar } from "../ui";
 import { useVersion } from "../useVersion";
 
-/* Gimel Account Manager — bewusst reduziert auf lokale Zugänge mit Benutzername
-   und Passwort (kein E-Mail-Zwang, keine Kundenkonditionen, kein 2FA-Ballast). */
+/* Proper Gimel Admin Account Management — local username + password accounts,
+   role control, active session inspection/revocation, lockout unlock, and
+   per-account audit trail. */
 
 type Role = "admin" | "staff" | "worker" | "customer";
 
@@ -34,10 +39,40 @@ interface AccountRow {
   last_login: string | null;
   locked: boolean;
   failed_login_count: number;
+  active_sessions: number;
+}
+
+interface AccountSummary {
+  total: number;
+  admins: number;
+  staff: number;
+  workers: number;
+  customers: number;
+  active: number;
+  inactive: number;
+  locked: number;
+  active_sessions: number;
+}
+
+interface SessionRow {
+  id: number;
+  ip: string;
+  user_agent: string;
+  created_at: string;
+  expires_at: string;
+  current: boolean;
+}
+
+interface AuditRow {
+  id: number;
+  at: string;
+  actor: string;
+  action: string;
+  detail: Record<string, unknown>;
 }
 
 const ROLES: Array<[Exclude<Role, "customer">, string]> = [
-  ["admin", "Admin — volle Rechte & Konten"],
+  ["admin", "Admin — volle Rechte, Konten & Updates"],
   ["staff", "Personal — Büro & Fertigung"],
   ["worker", "Werker — Fertigung & Versand"],
 ];
@@ -63,33 +98,47 @@ function generatePassword(): string {
   return `${pick()}-${pick()}-${n}`;
 }
 
-export default function Users() {
+export function AccountManagerPanel() {
   const version = useVersion();
   const me = getUser();
   const [rows, setRows] = useState<AccountRow[] | null>(null);
+  const [summary, setSummary] = useState<AccountSummary | null>(null);
   const [failed, setFailed] = useState("");
   const [q, setQ] = useState("");
   const [roleFilter, setRoleFilter] = useState<"" | Role>("");
+  const [showCustomers, setShowCustomers] = useState(false);
 
   const [createDlg, setCreateDlg] = useState<{ username: string; password: string; role: Exclude<Role, "customer">; show: boolean } | null>(null);
   const [editDlg, setEditDlg] = useState<{ orig: AccountRow; username: string; role: Exclude<Role, "customer">; active: boolean } | null>(null);
   const [pwDlg, setPwDlg] = useState<{ account: AccountRow; password: string; show: boolean } | null>(null);
   const [ownPwDlg, setOwnPwDlg] = useState<{ current: string; next: string; confirm: string; show: boolean } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AccountRow | null>(null);
+  const [inspect, setInspect] = useState<{
+    account: AccountRow;
+    tab: "sessions" | "audit";
+    sessions: SessionRow[] | null;
+    audit: AuditRow[] | null;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const qs = new URLSearchParams({ limit: "500" });
     if (q.trim()) qs.set("q", q.trim());
     if (roleFilter) qs.set("role", roleFilter);
+    if (showCustomers) qs.set("include_customers", "true");
     try {
-      setRows(await api<AccountRow[]>(`/api/accounts?${qs.toString()}`));
+      const [list, sum] = await Promise.all([
+        api<AccountRow[]>(`/api/accounts?${qs.toString()}`),
+        api<AccountSummary>("/api/accounts/summary"),
+      ]);
+      setRows(list);
+      setSummary(sum);
       setFailed("");
     } catch (e: any) {
       setFailed(e.message);
       toastError(e.message);
     }
-  }, [q, roleFilter]);
+  }, [q, roleFilter, showCustomers]);
 
   useEffect(() => {
     const t = setTimeout(load, 150);
@@ -98,8 +147,41 @@ export default function Users() {
 
   const sorted = useMemo(() => {
     if (!rows) return null;
-    return [...rows].sort((a, b) => a.username.localeCompare(b.username, "de"));
+    const rank: Record<Role, number> = { admin: 0, staff: 1, worker: 2, customer: 3 };
+    return [...rows].sort(
+      (a, b) => (rank[a.role] - rank[b.role]) || a.username.localeCompare(b.username, "de"),
+    );
   }, [rows]);
+
+  const openInspector = async (account: AccountRow, tab: "sessions" | "audit" = "sessions") => {
+    setInspect({ account, tab, sessions: null, audit: null });
+    try {
+      const [sessions, audit] = await Promise.all([
+        api<SessionRow[]>(`/api/accounts/${account.id}/sessions`),
+        api<AuditRow[]>(`/api/accounts/${account.id}/audit?limit=60`),
+      ]);
+      setInspect({ account, tab, sessions, audit });
+    } catch (err: any) {
+      toastError(err.message);
+      setInspect(null);
+    }
+  };
+
+  const logoutAll = async (account: AccountRow) => {
+    setBusy(true);
+    try {
+      const res = await api<{ revoked: number }>(`/api/accounts/${account.id}/logout-all`, { method: "POST" });
+      toastSuccess(`${account.username}: ${plural(res.revoked, "Sitzung", "Sitzungen")} beendet.`);
+      await load();
+      if (inspect && inspect.account.id === account.id) {
+        await openInspector(account, inspect.tab);
+      }
+    } catch (err: any) {
+      toastError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const createAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,7 +201,7 @@ export default function Users() {
           role: createDlg.role,
         }),
       });
-      toastSuccess(`Konto „${username}“ angelegt.`);
+      toastSuccess(`Konto „${username}“ (${ROLE_LABEL[createDlg.role]}) angelegt.`);
       setCreateDlg(null);
       load();
     } catch (err: any) {
@@ -166,7 +248,7 @@ export default function Users() {
         method: "POST",
         body: JSON.stringify({ password: pwDlg.password }),
       });
-      toastSuccess(`Passwort für „${pwDlg.account.username}“ geändert — bestehende Sitzungen beendet.`);
+      toastSuccess(`Passwort für „${pwDlg.account.username}“ gesetzt — bestehende Sitzungen beendet.`);
       setPwDlg(null);
       load();
     } catch (err: any) {
@@ -225,45 +307,61 @@ export default function Users() {
   };
 
   return (
-    <PageFrame
-      title="Gimel Konten"
-      sub="Lokale Benutzerverwaltung — nur Benutzername und Passwort."
-      actions={
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {version?.localnetOnly !== false && (
-            <Tag minimal icon="shield" intent="success">Nur lokales Netzwerk</Tag>
-          )}
-          <Button
-            icon="key"
-            text="Eigenes Passwort"
-            onClick={() => setOwnPwDlg({ current: "", next: "", confirm: "", show: false })}
-          />
-          <Button
-            intent="primary"
-            icon="new-person"
-            text="Neues Konto"
-            onClick={() => setCreateDlg({ username: "", password: "", role: "staff", show: true })}
-          />
-        </div>
-      }
-    >
-      <Toolbar meta={sorted && <span className="sub">{plural(sorted.length, "Konto", "Konten")}</span>}>
+    <div>
+      {summary && (
+        <KpiStrip
+          label="Kontenübersicht"
+          items={[
+            { id: "team", label: "Team-Konten", value: summary.total, primary: true, sub: `${summary.active} aktiv` },
+            { id: "admins", label: "Admins", value: summary.admins, primary: true, sub: `${summary.staff} Personal · ${summary.workers} Werker` },
+            { id: "sessions", label: "Aktive Sitzungen", value: summary.active_sessions, primary: true, sub: version?.localnetOnly !== false ? "Nur Localnet" : "Netzwerk" },
+            { id: "locked", label: "Gesperrt", value: summary.locked, primary: true, tone: summary.locked > 0 ? "danger" : "none", sub: summary.inactive > 0 ? `${summary.inactive} stillgelegt` : "alle frei" },
+          ]}
+        />
+      )}
+
+      <Toolbar
+        meta={sorted && <span className="sub">{plural(sorted.length, "Konto", "Konten")}</span>}
+        end={
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Button
+              icon="key"
+              text="Eigenes Passwort"
+              onClick={() => setOwnPwDlg({ current: "", next: "", confirm: "", show: false })}
+            />
+            <Button
+              intent="primary"
+              icon="new-person"
+              text="Neues Konto"
+              onClick={() => setCreateDlg({ username: "", password: "", role: "staff", show: true })}
+            />
+          </div>
+        }
+      >
         <InputGroup
           leftIcon="search"
           placeholder="Benutzername suchen…"
           value={q}
           aria-label="Benutzername suchen"
           onChange={(e) => setQ(e.target.value)}
-          style={{ width: 240, maxWidth: "100%" }}
+          style={{ width: 220, maxWidth: "100%" }}
         />
         <HTMLSelect
           value={roleFilter}
           aria-label="Rolle filtern"
           onChange={(e) => setRoleFilter(e.currentTarget.value as "" | Role)}
         >
-          <option value="">Alle Rollen</option>
+          <option value="">Alle Team-Rollen</option>
           {ROLES.map(([v]) => <option key={v} value={v}>{ROLE_LABEL[v]}</option>)}
         </HTMLSelect>
+        {(summary?.customers ?? 0) > 0 && (
+          <Switch
+            checked={showCustomers}
+            label={`Kunden zeigen (${summary?.customers})`}
+            style={{ margin: 0 }}
+            onChange={(e) => setShowCustomers(e.currentTarget.checked)}
+          />
+        )}
       </Toolbar>
 
       {failed && !rows ? (
@@ -285,7 +383,7 @@ export default function Users() {
               intent="primary"
               icon="new-person"
               text="Neues Konto"
-              onClick={() => setCreateDlg({ username: "", password: "", role: "staff", show: true })}
+              onClick={() => setCreateDlg({ username: "", password: "", role: "admin", show: true })}
             />
           }
         />
@@ -297,6 +395,7 @@ export default function Users() {
                 <th>Benutzername</th>
                 <th>Rolle</th>
                 <th>Status</th>
+                <th>Sitzungen</th>
                 <th>Zuletzt angemeldet</th>
                 <th style={{ width: 1 }}><span className="sr-only">Aktionen</span></th>
               </tr>
@@ -318,6 +417,16 @@ export default function Users() {
                         ? <Tag minimal intent="success">aktiv</Tag>
                         : <Tag minimal intent="warning">stillgelegt</Tag>}
                       {a.locked && <Tag minimal intent="danger" icon="lock" style={{ marginLeft: 4 }}>gesperrt</Tag>}
+                    </td>
+                    <td>
+                      <Button
+                        small
+                        minimal
+                        icon="desktop"
+                        text={a.active_sessions > 0 ? String(a.active_sessions) : "0"}
+                        title="Aktive Sitzungen und Verlauf anzeigen"
+                        onClick={() => openInspector(a, "sessions")}
+                      />
                     </td>
                     <td className="sub">{a.last_login ? fmtDateTime(a.last_login) : "nie"}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
@@ -344,6 +453,14 @@ export default function Users() {
                             })}
                           />
                         )}
+                        <Button
+                          small
+                          minimal
+                          icon="history"
+                          title="Sitzungen & Verlauf"
+                          aria-label={`Sitzungen und Verlauf für ${a.username}`}
+                          onClick={() => openInspector(a, "audit")}
+                        />
                         {a.locked && (
                           <Button
                             small
@@ -389,7 +506,7 @@ export default function Users() {
                   <InputGroup
                     id="acc-new-user"
                     autoFocus
-                    placeholder="z. B. max oder schicht1"
+                    placeholder="z. B. admin, max oder schicht1"
                     value={createDlg.username}
                     required
                     onChange={(e) => setCreateDlg({ ...createDlg, username: e.target.value })}
@@ -609,6 +726,107 @@ export default function Users() {
         </form>
       </Dialog>
 
+      {/* Sitzungen & Verlauf Drawer */}
+      <Drawer
+        isOpen={!!inspect}
+        onClose={() => setInspect(null)}
+        size={560}
+        title={inspect ? `Konto „${inspect.account.username}“` : ""}
+      >
+        {inspect && (
+          <div style={{ padding: 16, overflow: "auto", height: "100%" }}>
+            <Tabs
+              id="account-inspect-tabs"
+              selectedTabId={inspect.tab}
+              onChange={(t) => setInspect({ ...inspect, tab: t as "sessions" | "audit" })}
+            >
+              <Tab
+                id="sessions"
+                title={`Sitzungen (${inspect.sessions?.length ?? "…"})`}
+                panel={
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <span className="sub">Aktive Geräte und Browser-Sitzungen</span>
+                      <Button
+                        small
+                        intent="danger"
+                        icon="log-out"
+                        text="Alle Sitzungen beenden"
+                        loading={busy}
+                        disabled={!inspect.sessions?.length}
+                        onClick={() => logoutAll(inspect.account)}
+                      />
+                    </div>
+                    {!inspect.sessions ? (
+                      <Spinner size={24} />
+                    ) : inspect.sessions.length === 0 ? (
+                      <Callout icon="info-sign">Keine aktiven Sitzungen.</Callout>
+                    ) : (
+                      <HTMLTable compact striped style={{ width: "100%" }}>
+                        <thead>
+                          <tr>
+                            <th>IP / Gerät</th>
+                            <th>Angemeldet</th>
+                            <th>Gültig bis</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {inspect.sessions.map((s) => (
+                            <tr key={s.id}>
+                              <td>
+                                <span className="mono">{s.ip || "lokal"}</span>
+                                {s.current && <Tag minimal intent="success" style={{ marginLeft: 6 }}>dieses Gerät</Tag>}
+                                <div className="sub" style={{ fontSize: 11, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {s.user_agent || "—"}
+                                </div>
+                              </td>
+                              <td className="sub">{fmtDateTime(s.created_at)}</td>
+                              <td className="sub">{fmtDateTime(s.expires_at)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </HTMLTable>
+                    )}
+                  </div>
+                }
+              />
+              <Tab
+                id="audit"
+                title={`Verlauf (${inspect.audit?.length ?? "…"})`}
+                panel={
+                  <div style={{ marginTop: 12 }}>
+                    {!inspect.audit ? (
+                      <Spinner size={24} />
+                    ) : inspect.audit.length === 0 ? (
+                      <Callout icon="history">Noch keine Einträge im Sicherheitsprotokoll.</Callout>
+                    ) : (
+                      <HTMLTable compact striped style={{ width: "100%" }}>
+                        <thead>
+                          <tr>
+                            <th>Zeit</th>
+                            <th>Akteur</th>
+                            <th>Aktion</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {inspect.audit.map((a) => (
+                            <tr key={a.id}>
+                              <td className="sub">{fmtDateTime(a.at)}</td>
+                              <td className="mono">{a.actor}</td>
+                              <td><Tag minimal>{a.action}</Tag></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </HTMLTable>
+                    )}
+                  </div>
+                }
+              />
+            </Tabs>
+          </div>
+        )}
+      </Drawer>
+
       {/* Konto löschen / stilllegen */}
       <Alert
         isOpen={!!deleteTarget}
@@ -626,6 +844,23 @@ export default function Users() {
           </p>
         )}
       </Alert>
+    </div>
+  );
+}
+
+export default function Users() {
+  const version = useVersion();
+  return (
+    <PageFrame
+      title="Gimel Konten"
+      sub="Admin-Kontenverwaltung — lokale Benutzer, Rollen, aktive Sitzungen und Sicherheitsverlauf."
+      actions={
+        version?.localnetOnly !== false ? (
+          <Tag minimal icon="shield" intent="success">Nur lokales Netzwerk</Tag>
+        ) : undefined
+      }
+    >
+      <AccountManagerPanel />
     </PageFrame>
   );
 }

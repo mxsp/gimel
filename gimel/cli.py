@@ -489,6 +489,19 @@ def _setup_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def _install_ui_cmd(args: argparse.Namespace) -> int:
+    """Launch the zero-dependency browser GUI installer."""
+    script = Path(__file__).resolve().parent.parent / "scripts" / "install-ui.py"
+    if not script.is_file():
+        print("Error: scripts/install-ui.py not found in this installation.", file=sys.stderr)
+        return 1
+    cmd = [sys.executable, str(script), "--port", str(args.port)]
+    if args.no_browser:
+        cmd.append("--no-browser")
+    import subprocess
+    return subprocess.call(cmd)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="gimel", description="Gimel — orders in, parts out.")
     p.add_argument("--version", action="version", version=f"gimel {__version__}")
@@ -580,6 +593,11 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--admin-user", default="")
     st.add_argument("--admin-password", default="")
     st.set_defaults(fn=_setup_cmd)
+
+    iu = sub.add_parser("install-ui", help="launch browser-based GUI installer (http://127.0.0.1:8099)")
+    iu.add_argument("--port", type=int, default=8099)
+    iu.add_argument("--no-browser", action="store_true")
+    iu.set_defaults(fn=_install_ui_cmd)
 
     up = sub.add_parser("update", help="check or apply updates from GitHub Releases (mxsp/gimel)")
     up.add_argument("--check", action="store_true", help="only check for a newer GitHub release")

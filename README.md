@@ -42,7 +42,17 @@ Create and manage local `Admin`, `Personal`, and `Werker` logins using only **Us
 
 ## One-Time Setup & Quick Start
 
-### Option 1: One-Time Setup Script (Recommended for Local / LAN Install)
+### Option 1: Browser GUI Installer (Easiest — Zero Dependencies)
+
+Launch the guided web installer in your browser (`http://127.0.0.1:8099`) using only Python 3.11+ — checks prerequisites, installs dependencies, builds all UIs, sets up your first Admin account, and starts Gimel in one click:
+
+```bash
+git clone https://github.com/mxsp/gimel.git
+cd gimel
+python3 scripts/install-ui.py
+```
+
+### Option 2: CLI One-Time Setup Script (Linux / macOS / Windows)
 
 Run once to create `.venv`, install Gimel, build all SPAs (`/app`, `/studio`, `/twin`, `/lab`), and initialize both Playground and Production:
 

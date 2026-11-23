@@ -38,6 +38,18 @@ This manual covers everything required to install, initialize, operate, manage a
 
 ## 2. One-Time Setup & Installation
 
+### Option 0: Browser GUI Installer (Recommended — Zero Extra Dependencies)
+
+Clone the repo and launch the built-in web installer (pure Python standard library, opens at `http://127.0.0.1:8099`):
+
+```bash
+git clone https://github.com/mxsp/gimel.git
+cd gimel
+python3 scripts/install-ui.py
+```
+
+The GUI Installer checks Python/Node/LAN status, lets you choose **Playground**, **Production**, or **Both**, configures your first **Admin Username + Password**, streams live installation progress, and launches Gimel with one click. (Once installed, you can also run `gimel install-ui`.)
+
 ### Option A: One-Time Setup Script (Source / Local Install)
 
 Clone the repository and run the one-time setup script once. It creates `.venv`, installs Gimel, builds all four frontend apps (`/app`, `/studio`, `/twin`, `/lab`), seeds the isolated Playground sandbox, and initializes Production:
