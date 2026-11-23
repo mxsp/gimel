@@ -31,7 +31,7 @@ from typing import Literal
 from ..version import APP_VERSION
 
 DEFAULT_UPDATE_REPO = "mxsp/gimel"
-CACHE_TTL_SECONDS = 6 * 3600
+CACHE_TTL_SECONDS = 5 * 60
 _SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-.](.+))?$")
 
 InstallKind = Literal["binary", "docker", "git", "package"]
@@ -360,10 +360,10 @@ def _apply_binary_update(info: UpdateStatus) -> UpdateResult:
                 detail="Release-Archiv enthielt keine ausführbare Gimel-Datei.",
             )
 
-        staged = exe_path.with_suffix(exe_path.suffix + ".new")
-        backup = exe_path.with_suffix(exe_path.suffix + ".bak")
-        shutil.copy2(new_bin, staged)
         if platform.system().lower() != "windows":
+            staged = exe_path.with_suffix(exe_path.suffix + ".new")
+            backup = exe_path.with_suffix(exe_path.suffix + ".bak")
+            shutil.copy2(new_bin, staged)
             os.chmod(staged, 0o755)
             shutil.copy2(exe_path, backup)
             os.replace(staged, exe_path)
@@ -375,6 +375,17 @@ def _apply_binary_update(info: UpdateStatus) -> UpdateResult:
                 restart_required=True,
                 detail=f"Gimel wurde auf {info.latest_tag} aktualisiert.",
             )
+
+        # Windows: support both --onedir bundles (gimel.exe + _internal/) and --onefile binaries.
+        bundle_root = new_bin.parent
+        if (bundle_root / "_internal").is_dir():
+            staging_dir = exe_path.parent / ".update-staging"
+            if staging_dir.exists():
+                shutil.rmtree(staging_dir, ignore_errors=True)
+            shutil.copytree(bundle_root, staging_dir)
+        else:
+            staged = exe_path.with_suffix(exe_path.suffix + ".new")
+            shutil.copy2(new_bin, staged)
         return UpdateResult(
             ok=True,
             install_kind="binary",
@@ -586,7 +597,13 @@ def schedule_restart(delay_seconds: float = 1.1) -> bool:
                 bat = Path(tempfile.gettempdir()) / f"gimel-restart-{pid}.cmd"
                 quoted = " ".join(f'"{c}"' for c in cmd)
                 swap_lines = ""
-                if staged and staged.is_file() and exe_path:
+                staging_dir = exe_path.parent / ".update-staging" if exe_path else None
+                if staging_dir and staging_dir.is_dir() and exe_path:
+                    swap_lines = (
+                        f'robocopy "{staging_dir}" "{exe_path.parent}" /E /IS /IT /R:5 /W:1 /NFL /NDL /NJH /NJS >NUL\r\n'
+                        f'rmdir /S /Q "{staging_dir}" >NUL 2>&1\r\n'
+                    )
+                elif staged and staged.is_file() and exe_path:
                     swap_lines = (
                         f'move /Y "{exe_path}" "{exe_path}.bak" >NUL 2>&1\r\n'
                         f'move /Y "{staged}" "{exe_path}" >NUL 2>&1\r\n'

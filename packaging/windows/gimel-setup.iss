@@ -1,10 +1,11 @@
 ; Gimel Windows Installer (Inno Setup 6)
-; Produces Gimel-Setup-x64.exe with modern branding, Start Menu / Desktop
-; shortcuts, optional Private-LAN Windows Firewall rule, uninstaller, and
-; automatic launch of the Gimel UI Setup Wizard.
+; Produces Gimel-Setup-x64.exe from the PyInstaller --onedir bundle (no self-extracting
+; %TEMP%\_MEI* unpacker), with Start Menu / Desktop shortcuts, direct winget installation
+; for Python 3.12 and Docker Desktop (no hidden PowerShell dropper heuristics), optional
+; Private-LAN Windows Firewall rule, uninstaller, and automatic Setup UI launch.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.4"
+  #define AppVersion "0.2.5"
 #endif
 
 [Setup]
@@ -41,15 +42,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "lanfirewall"; Description: "Windows-Firewall für lokales Netzwerk (LAN, Ports 8040/8041) freigeben (erfordert Admin-Rechte)"; GroupDescription: "Netzwerk"; Flags: unchecked
-Name: "installpython"; Description: "Python 3.12 installieren (falls nicht vorhanden, für Skripte, Agent Lab & Piper TTS)"; GroupDescription: "System-Komponenten (empfohlen)"
-Name: "installdocker"; Description: "Docker Desktop installieren (falls nicht vorhanden, für Container-Sandbox & Docker-Modus)"; GroupDescription: "System-Komponenten (empfohlen)"
+Name: "installpython"; Description: "Python 3.12 installieren über winget (falls nicht vorhanden, für Skripte, Agent Lab & Piper TTS)"; GroupDescription: "System-Komponenten (empfohlen)"
+Name: "installdocker"; Description: "Docker Desktop installieren über winget (falls nicht vorhanden, für Container-Sandbox & Docker-Modus)"; GroupDescription: "System-Komponenten (empfohlen)"
 
 [Files]
-Source: "..\dist\gimel.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\Start-Gimel-Playground.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\Start-Gimel-Production.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\Start-Gimel-Both.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dist\Start-Gimel-Setup.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\gimel\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "install-deps.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "gimel.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -64,8 +61,8 @@ Name: "{autodesktop}\Gimel"; Filename: "{app}\gimel.exe"; Parameters: "--mode se
 
 [Run]
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""Gimel Localnet (8040-8041)"" dir=in action=allow protocol=TCP localport=8040-8041 profile=private"; Flags: runhidden waituntilterminated; Tasks: lanfirewall
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install-deps.ps1"" -InstallPython"; Flags: runhidden waituntilterminated; StatusMsg: "Prüfe/installiere Python 3.12..."; Tasks: installpython
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install-deps.ps1"" -InstallDocker"; Flags: runhidden waituntilterminated; StatusMsg: "Prüfe/installiere Docker Desktop..."; Tasks: installdocker
+Filename: "winget.exe"; Parameters: "install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements --scope user"; Flags: waituntilterminated skipifdoesntexist; StatusMsg: "Installiere Python 3.12 über winget..."; Tasks: installpython
+Filename: "winget.exe"; Parameters: "install --id Docker.DockerDesktop -e --accept-package-agreements --accept-source-agreements"; Flags: waituntilterminated skipifdoesntexist; StatusMsg: "Installiere Docker Desktop über winget..."; Tasks: installdocker
 Filename: "{app}\gimel.exe"; Parameters: "--mode setup-ui"; Description: "Gimel Einrichtungs-Assistent jetzt öffnen"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

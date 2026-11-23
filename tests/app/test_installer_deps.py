@@ -20,26 +20,28 @@ def test_inno_setup_iss_has_python_and_docker_tasks() -> None:
     assert 'GroupDescription: "System-Komponenten (empfohlen)"' in iss
     assert 'Name: "installpython"' in iss
     assert 'Name: "installdocker"' in iss
+    assert 'Source: "..\\dist\\gimel\\*"; DestDir: "{app}"' in iss
     assert 'Source: "install-deps.ps1"; DestDir: "{app}"; Flags: ignoreversion' in iss
+    assert "-ExecutionPolicy Bypass" not in iss
 
     run_section = iss[iss.index("[Run]"):iss.index("[UninstallRun]")]
-    idx_py = run_section.index("-InstallPython")
-    idx_dk = run_section.index("-InstallDocker")
+    idx_py = run_section.index("Python.Python.3.12")
+    idx_dk = run_section.index("Docker.DockerDesktop")
     idx_ui = run_section.index('Parameters: "--mode setup-ui"')
     assert idx_py < idx_ui
     assert idx_dk < idx_ui
+    assert "winget.exe" in run_section
     assert "Tasks: installpython" in iss
     assert "Tasks: installdocker" in iss
 
 
-def test_install_deps_ps1_exists_and_has_winget_and_fallbacks() -> None:
+def test_install_deps_ps1_exists_and_uses_winget_without_temp_dropper() -> None:
     ps1_path = ROOT / "packaging" / "windows" / "install-deps.ps1"
     assert ps1_path.is_file()
     text = ps1_path.read_text(encoding="utf-8")
     assert "Python.Python.3.12" in text
     assert "Docker.DockerDesktop" in text
-    assert "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe" in text
-    assert "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe" in text
+    assert "Invoke-WebRequest" not in text
     assert "install-deps.log" in text
     assert "exit 0" in text
 

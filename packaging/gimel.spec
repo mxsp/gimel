@@ -8,6 +8,8 @@ Bundles both Playground and Production modes, plus all built SPAs:
   - /lab    (agentlab/webapp/dist)
 """
 
+import os
+import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -68,18 +70,48 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name="gimel",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    console=True,
-    icon=str(win_ico) if win_ico.is_file() else None,
-    disable_windowed_traceback=False,
-)
+# Use --onedir on Windows by default (no self-extracting %TEMP%\_MEI* unpacker ->
+# faster startup and dramatically fewer Windows Defender false positives).
+# Inno Setup compresses the entire directory cleanly into Gimel-Setup-x64.exe.
+USE_ONEDIR = sys.platform == "win32" or os.environ.get("GIMEL_PYINSTALLER_ONEDIR") == "1"
+
+if USE_ONEDIR:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="gimel",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=True,
+        icon=str(win_ico) if win_ico.is_file() else None,
+        disable_windowed_traceback=False,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name="gimel",
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name="gimel",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=True,
+        icon=str(win_ico) if win_ico.is_file() else None,
+        disable_windowed_traceback=False,
+    )
