@@ -8,6 +8,7 @@ import type { AppModuleDescriptor } from "./modules/types";
 import { seedModulesFromVersion } from "./modules/externalStore";
 
 export interface AppVersion {
+  version?: string;
   demo: boolean;
   /** Der Assistent ist in dieser Instanz eingebaut (/api/agent vorhanden). */
   agent: boolean;
@@ -28,6 +29,7 @@ export function loadVersion(): Promise<AppVersion> {
       const modules = Array.isArray(v?.modules) ? (v.modules as AppModuleDescriptor[]) : undefined;
       if (modules) seedModulesFromVersion(modules);
       return {
+        version: typeof v?.version === "string" ? v.version : undefined,
         demo: v?.demo === true,
         agent: v?.agent === true,
         localnetOnly: v?.localnet_only !== false,

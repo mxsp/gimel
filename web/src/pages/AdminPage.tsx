@@ -11,6 +11,7 @@ import { AccountManagerPanel } from "./Users";
 import AgentSettings from "@agentlab/AgentSettings";
 import { installAgentTransport } from "../components/agent/transport";
 import "../components/agent/agent.css";
+import SystemSettingsPanel from "../components/SystemSettingsPanel";
 
 /* Admin — Kennzahlen, Betriebsparameter, Protokoll und der Ereignisstrom.
 
@@ -53,6 +54,7 @@ export default function AdminPage() {
         <Tab id="protokoll" title="Protokoll" panel={<AuditPanel />} />
         <Tab id="strom" title="Ereignisse" panel={<EventsPanel />} />
         <Tab id="updates" title="Updates" panel={<UpdatesPanel />} />
+        <Tab id="system" title="System & Info" panel={<SystemSettingsPanel isAdmin onNavigateTab={setTab} />} />
       </Tabs>
     </PageFrame>
   );

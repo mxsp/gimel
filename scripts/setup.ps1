@@ -10,6 +10,7 @@ param(
     [string]$AdminUser = "",
     [string]$AdminPassword = "",
     [switch]$SkipWeb,
+    [switch]$SkipDocker,
     [switch]$WithPiper,
     [string]$PiperVoice = "de_DE-thorsten-medium"
 )
@@ -21,6 +22,47 @@ Set-Location $Root
 Write-Host "================================================================"
 Write-Host "  Gimel - One-Time Setup (Localnet | Playground + Production)"
 Write-Host "================================================================"
+
+function Refresh-EnvPath {
+    $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $parts = @()
+    if ($machinePath) { $parts += $machinePath }
+    if ($userPath) { $parts += $userPath }
+    foreach ($p in @(
+        "$env:LOCALAPPDATA\Programs\Python\Python312",
+        "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts",
+        "$env:ProgramFiles\Python312",
+        "$env:ProgramFiles\Python312\Scripts",
+        "$env:ProgramFiles\Docker\Docker\resources\bin"
+    )) {
+        if ((Test-Path $p) -and ($parts -notcontains $p)) { $parts += $p }
+    }
+    $env:Path = ($parts -join ";")
+}
+
+$DepsScript = Join-Path $Root "packaging\windows\install-deps.ps1"
+$NeedPython = -not (Get-Command python -ErrorAction SilentlyContinue)
+if (-not $NeedPython) {
+    try {
+        $pyVer = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+        if ($LASTEXITCODE -ne 0 -or $pyVer -notmatch '^3\.(1[1-9]|[2-9]\d)$') {
+            $NeedPython = $true
+        }
+    } catch {
+        $NeedPython = $true
+    }
+}
+$NeedDocker = (-not $SkipDocker) -and (-not (Get-Command docker -ErrorAction SilentlyContinue)) -and (-not (Test-Path "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"))
+
+if (($NeedPython -or $NeedDocker) -and (Test-Path $DepsScript)) {
+    Write-Host "[0/4] Checking/installing system dependencies (Python 3.12 / Docker)..."
+    $depArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $DepsScript)
+    if ($NeedPython) { $depArgs += "-InstallPython" }
+    if ($NeedDocker) { $depArgs += "-InstallDocker" }
+    & powershell.exe @depArgs
+    Refresh-EnvPath
+}
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     throw "Python 3.11+ is required."

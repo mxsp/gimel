@@ -54,6 +54,7 @@ from .routers import (
     robot_platform,
     robots,
     shipping,
+    system_info,
     updates,
     users,
 )
@@ -272,7 +273,7 @@ def create_app() -> FastAPI:
 
 
     for r in (
-            auth.router, account.router, accounts.router, updates.router, users.router, products.router, rates.router,
+            auth.router, account.router, accounts.router, system_info.router, updates.router, users.router, products.router, rates.router,
             quotes.router, production.router, production.public_router, nesting.router, punchout.router, admin.router,
             shipping.router, links.router, inventory.router, integration.router, customers.router,
             desk.router, invoicing.router, factory.router,
@@ -354,30 +355,38 @@ def create_app() -> FastAPI:
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-    # Root- und Altpfade leiten auf das Portal unter /app weiter.
-    LEGACY_ROUTES = {
-        "/": "/app",
-        "/hub": "/app",
-        "/admin": "/app#/admin",
-        "/produktion": "/app#/produktion",
-        "/disposition": "/app#/disposition",
-        "/kunden": "/app#/kunden",
-        "/versand": "/app#/versand",
-    }
+        # Die fünf alten Subapps sind in das interne Portal unter /app übernommen
+        # (Verwaltung, Werkeransicht, Versand, Disposition, Kundenstamm). Ihre
+        # Adressen bleiben als Umleitung bestehen: Lesezeichen, Aushänge an der
+        # Maschine und verlinkte Laufkarten sollen nicht ins Leere laufen.
+        #
+        # Die Dateien selbst liegen weiter unter /static — erreichbar, wenn jemand
+        # sie ausdrücklich sucht, aber nicht mehr verlinkt.
+        LEGACY_ROUTES = {
+            "/": "/app",
+            "/hub": "/app",
+            "/admin": "/app#/admin",
+            "/produktion": "/app#/produktion",
+            "/disposition": "/app#/disposition",
+            "/kunden": "/app#/kunden",
+            "/versand": "/app#/versand",
+        }
 
-    def _make_redirect(target: str):
-        def endpoint() -> RedirectResponse:
-            return RedirectResponse(target, status_code=307)
+        def _make_redirect(target: str):
+            def endpoint() -> RedirectResponse:
+                # 307 statt 301: eine dauerhafte Umleitung brennt sich in den
+                # Browser-Cache und macht ein Zurückrollen zur Geduldsprobe.
+                return RedirectResponse(target, status_code=307)
 
-        return endpoint
+            return endpoint
 
-    for _path, _target in LEGACY_ROUTES.items():
-        app.add_api_route(
-            _path,
-            _make_redirect(_target),
-            methods=["GET"],
-            include_in_schema=False,
-        )
+        for _path, _target in LEGACY_ROUTES.items():
+            app.add_api_route(
+                _path,
+                _make_redirect(_target),
+                methods=["GET"],
+                include_in_schema=False,
+            )
 
     # --------------------------------------------------------------------------
     # Internes Portal (Auftragsbüro) — React/Blueprint-SPA, gebaut mit Vite.

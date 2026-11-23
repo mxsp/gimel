@@ -18,7 +18,7 @@ import { readFlag, writeFlag } from "./ui/detail";
 const TOOLS_KEY = "gimel-nav-tools";
 const DENSITIES: Density[] = ["standard", "compact", "comfort"];
 
-export default function SideNavigation({ route, role, features, area, onArea, user, onHelp, onLogout }: {
+export default function SideNavigation({ route, role, features, area, onArea, user, onHelp, onLogout, appVersion, onOpenSystemInfo }: {
   route: string;
   role: string;
   features: string[] | null;
@@ -27,6 +27,8 @@ export default function SideNavigation({ route, role, features, area, onArea, us
   user?: SessionUser | null;
   onHelp?: () => void;
   onLogout?: () => void;
+  appVersion?: string;
+  onOpenSystemInfo?: () => void;
 }) {
   const sidebar = useRef<HTMLElement>(null);
   const section = navSection(route, role);
@@ -180,6 +182,18 @@ export default function SideNavigation({ route, role, features, area, onArea, us
         </KeyPopover>
       )}
       <AppSwitcher active="erp" />
+      {onOpenSystemInfo && (
+        <button
+          type="button"
+          className="bp5-button bp5-minimal bp5-small"
+          style={{ width: "100%", justifyContent: "space-between", fontSize: 11, opacity: 0.78 }}
+          onClick={onOpenSystemInfo}
+          title="Gimel Einstellungen & System-Info öffnen"
+        >
+          <span className="mono">{appVersion ? `v${appVersion}` : "Gimel"} · Einstellungen & Info</span>
+          <Icon icon="info-sign" size={12} aria-hidden="true" />
+        </button>
+      )}
     </div>
   </aside>;
 }

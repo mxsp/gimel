@@ -118,6 +118,16 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
   const [totalArtifacts, setTotalArtifacts] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [pendingProposals, setPendingProposals] = useState(0);
+  const [gimelVersion, setGimelVersion] = useState<string>("");
+
+  useEffect(() => {
+    fetch("/api/version")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((v) => {
+        if (v && typeof v.version === "string") setGimelVersion(v.version);
+      })
+      .catch(() => { /* ignore */ });
+  }, []);
   const [darkTheme, setDarkTheme] = useState(() => document.documentElement.dataset.theme === "dark");
   const [refreshToken, setRefreshToken] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -745,6 +755,16 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
                 <Icon icon="chat" size={12} aria-hidden="true" /> Lab
               </a>
             </nav>
+            <button
+              type="button"
+              className="bp5-button bp5-minimal bp5-small"
+              style={{ width: "100%", justifyContent: "space-between", fontSize: 11, opacity: 0.78, marginTop: 4 }}
+              onClick={() => openView("settings")}
+              title="Gimel Einstellungen & System-Info öffnen"
+            >
+              <span className="mono">{gimelVersion ? `v${gimelVersion}` : "Gimel"} · Einstellungen & Info</span>
+              <Icon icon="info-sign" size={12} aria-hidden="true" />
+            </button>
           </div>
         </aside>
       )}

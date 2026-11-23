@@ -1,4 +1,4 @@
-import { Button, Classes, FormGroup, Icon, InputGroup, Navbar, Toaster } from "@blueprintjs/core";
+import { Button, Classes, Dialog, DialogBody, FormGroup, Icon, InputGroup, Navbar, Toaster } from "@blueprintjs/core";
 import { PageLoading } from "./components/PageStates";
 import NonIdealState from "./components/NonIdealState";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
@@ -11,6 +11,7 @@ import { AppVersion } from "./version";
 import { NAV_GROUPS, missingFeature, useWorkArea } from "./nav";
 import { useShortcuts } from "./useShortcuts";
 import ShortcutHelp from "./components/ShortcutHelp";
+import SystemSettingsPanel from "./components/SystemSettingsPanel";
 import GimelMark from "./components/GimelMark";
 import Login from "./components/Login";
 import ThemeSwitch from "./components/ThemeSwitch";
@@ -64,6 +65,7 @@ export default function App() {
   const route = useHashRoute();
   const version = useVersion();
   const [help, setHelp] = useState(false);
+  const [systemInfoOpen, setSystemInfoOpen] = useState(false);
   // Das PIN-Konto bleibt in der Datenbank staff, arbeitet aber als Admin (Beschluss 2026-11-02).
   const role = session ? (canAdminWork(session) ? "admin" : session.role) : "";
   const showHelp = useCallback(() => setHelp(true), []);
@@ -148,6 +150,8 @@ export default function App() {
           onArea={goToArea}
           user={session}
           onHelp={showHelp}
+          appVersion={version?.version}
+          onOpenSystemInfo={() => setSystemInfoOpen(true)}
           onLogout={async () => {
             try { await api("/api/auth/logout", { method: "POST" }); }
             finally { clearSession(); forgetSession(); setSessionState(null); }
@@ -159,6 +163,20 @@ export default function App() {
         )}
       </div>
       <ShortcutHelp isOpen={help} onClose={() => setHelp(false)} role={role} features={version?.features ?? null} />
+      <Dialog
+        isOpen={systemInfoOpen}
+        onClose={() => setSystemInfoOpen(false)}
+        title="Gimel Einstellungen & System-Info"
+        icon="info-sign"
+        style={{ width: "min(760px, 94vw)" }}
+      >
+        <DialogBody>
+          <SystemSettingsPanel
+            isAdmin={canAdminWork(session)}
+            onCloseDialog={() => setSystemInfoOpen(false)}
+          />
+        </DialogBody>
+      </Dialog>
       <JumpPalette role={role} features={version?.features ?? null} area={area} assistant={agentEnabled}
                    onHelp={showHelp} onAssistant={copilot.toggle} />
       {agentEnabled && !copilot.open && (

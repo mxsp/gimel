@@ -68,6 +68,13 @@ def system_check() -> dict:
     npm_ver = _cmd_version(["npm", "--version"]) if shutil.which("npm") else ""
     git_ver = _cmd_version(["git", "--version"]) if shutil.which("git") else ""
     docker_ver = _cmd_version(["docker", "--version"]) if shutil.which("docker") else ""
+    docker_running = False
+    if docker_ver:
+        try:
+            chk_d = subprocess.run(["docker", "info"], capture_output=True, timeout=2, check=False)
+            docker_running = chk_d.returncode == 0
+        except Exception:  # noqa: BLE001
+            docker_running = False
     venv_ready = _venv_bin("python").is_file()
     web_built = (ROOT / "gimel" / "webapp" / "dist" / "index.html").is_file()
     lab_built = (ROOT / "agentlab" / "webapp" / "dist" / "index.html").is_file()
@@ -86,7 +93,7 @@ def system_check() -> dict:
         "node": {"ok": bool(node_ver), "version": node_ver or "nicht gefunden"},
         "npm": {"ok": bool(npm_ver), "version": npm_ver or "nicht gefunden"},
         "git": {"ok": bool(git_ver), "version": git_ver or "nicht gefunden"},
-        "docker": {"ok": bool(docker_ver), "version": docker_ver or "optional"},
+        "docker": {"ok": bool(docker_ver), "version": docker_ver or "nicht installiert", "running": docker_running},
         "venv_ready": venv_ready,
         "web_built": web_built and lab_built,
         "piper_ready": piper_ready,
@@ -151,6 +158,49 @@ def _run_stream(cmd: list[str], cwd: Path, env: dict | None = None) -> int:
     return proc.wait()
 
 
+def _install_docker_auto() -> None:
+    """Best-effort automatic Docker installation without crashing Gimel setup."""
+    if shutil.which("docker"):
+        STATE.log("Docker ist bereits installiert.")
+        return
+    if IS_WIN:
+        deps_ps1 = ROOT / "packaging" / "windows" / "install-deps.ps1"
+        if deps_ps1.is_file():
+            rc = _run_stream(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(deps_ps1), "-InstallDocker"],
+                ROOT,
+            )
+            if rc != 0:
+                STATE.log("Hinweis: Docker-Installation konnte nicht automatisch abgeschlossen werden.")
+            return
+        if shutil.which("winget"):
+            _run_stream(
+                ["winget", "install", "--id", "Docker.DockerDesktop", "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+                ROOT,
+            )
+            return
+        STATE.log("Hinweis: Bitte Docker Desktop manuell installieren (https://www.docker.com/products/docker-desktop/).")
+        return
+
+    if platform.system().lower() == "darwin":
+        if shutil.which("brew"):
+            _run_stream(["brew", "install", "--cask", "docker"], ROOT)
+        else:
+            STATE.log("Hinweis: Homebrew nicht gefunden. Bitte Docker Desktop manuell installieren.")
+        return
+
+    is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+    if is_root:
+        _run_stream(["sh", "-c", "curl -fsSL https://get.docker.com | sh"], ROOT)
+        return
+    if shutil.which("sudo"):
+        chk = subprocess.run(["sudo", "-n", "true"], capture_output=True, check=False)
+        if chk.returncode == 0:
+            _run_stream(["sudo", "sh", "-c", "curl -fsSL https://get.docker.com | sh"], ROOT)
+            return
+    STATE.log("Hinweis: Docker-Installation benötigt Root/sudo. Später ausführen: curl -fsSL https://get.docker.com | sudo sh")
+
+
 def _install_worker(opts: dict) -> None:
     mode = opts.get("mode", "both")
     if mode not in ("playground", "production", "both"):
@@ -160,6 +210,7 @@ def _install_worker(opts: dict) -> None:
     admin_user = str(opts.get("admin_user") or "").strip().lower()
     admin_password = str(opts.get("admin_password") or "")
     reset_pg = bool(opts.get("reset_playground", False))
+    install_docker = bool(opts.get("install_docker", True))
     install_piper = bool(opts.get("install_piper", False))
     piper_voice = str(opts.get("piper_voice") or "de_DE-thorsten-medium").strip()
 
@@ -174,6 +225,10 @@ def _install_worker(opts: dict) -> None:
         STATE.lan_url = ""
 
     try:
+        if install_docker and not shutil.which("docker"):
+            STATE.set_step("0/4 Docker automatisch installieren (falls nicht vorhanden)")
+            _install_docker_auto()
+
         # 1. Python virtual environment + editable install
         STATE.set_step("1/4 Python-Umgebung (.venv) & Gimel installieren")
         py_bin = _venv_bin("python")
@@ -412,6 +467,7 @@ HTML = r"""<!doctype html>
     <div class="row" style="justify-content:space-between;align-items:flex-start;">
       <div style="display:grid;gap:8px;">
         <label class="check-row"><input id="build_web" type="checkbox" checked /> Frontend-Oberflächen bauen (/app, /studio, /twin, /lab)</label>
+        <label class="check-row"><input id="install_docker" type="checkbox" checked /> Docker installieren (falls nicht vorhanden)</label>
         <label class="check-row"><input id="install_piper" type="checkbox" /> Optional (Opt-In): Lokale Sprachausgabe mit Piper TTS installieren (GPL-3.0 · de_DE-thorsten-medium)</label>
       </div>
       <button id="install-btn" class="primary" type="submit">Gimel jetzt einrichten</button>
@@ -448,6 +504,7 @@ async function loadCheck() {
   if (d.web_built) $("build_web").checked = false;
   const items = [
     ["Python", d.python.version, d.python.ok ? "ok" : "err"],
+    ["Docker", d.docker.ok ? (d.docker.running ? `${d.docker.version} (aktiv)` : `${d.docker.version} (installiert)`) : "nicht installiert", d.docker.ok ? "ok" : "warn"],
     ["Node.js / npm", d.node.ok ? `${d.node.version} · npm ${d.npm.version}` : "nicht gefunden", d.node.ok ? "ok" : "warn"],
     ["Umgebung (.venv)", d.venv_ready ? "vorhanden" : "wird angelegt", "ok"],
     ["Oberflächen", d.web_built ? "bereits gebaut" : "werden gebaut", d.web_built ? "ok" : "warn"],
@@ -519,6 +576,7 @@ $("form").onsubmit = async (e) => {
     admin_user: $("admin_user").value.trim(),
     admin_password: $("admin_password").value,
     build_web: $("build_web").checked,
+    install_docker: $("install_docker").checked,
     install_piper: $("install_piper").checked,
     piper_voice: "de_DE-thorsten-medium",
   };

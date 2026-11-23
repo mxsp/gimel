@@ -1,12 +1,51 @@
 import {
-  Button, FormGroup, HTMLSelect, InputGroup, Spinner, Switch, Tag, TextArea,
+  Button, FormGroup, HTMLSelect, Icon, InputGroup, Spinner, Switch, Tag, TextArea,
 } from "@blueprintjs/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AgentSettings as SettingsData, ApiError, getAgentSettings, getPiperStatus, getSandboxStatus,
+  AgentSettings as SettingsData, api, ApiError, getAgentSettings, getPiperStatus, getSandboxStatus,
   installPiperTts, PiperStatus, resetAgentSettings, SandboxRuntimeStatus, SandboxTestResult,
   SettingField, speakAudio, testSandbox, testWebSearch, updateAgentSettings, WebSearchResult,
 } from "./api";
+
+interface GimelSystemInfo {
+  app_name: string;
+  version: string;
+  engine_version: string;
+  version_label: string;
+  mode: string;
+  demo: boolean;
+  install_kind: string;
+  git_commit: string;
+  git_branch: string;
+  python_version: string;
+  platform: string;
+  hostname: string;
+  docker: { installed: boolean; version: string; running: boolean };
+  localnet_only: boolean;
+  lan_ips: string[];
+  uptime_seconds: number;
+  license: string;
+  repo_url: string;
+  releases_url: string;
+  website_url: string;
+  database_backend: string;
+  update: {
+    latest_version: string | null;
+    latest_tag: string | null;
+    update_available: boolean;
+    release_url: string;
+  };
+}
+
+interface GimelSystemSettings {
+  instance_name: string;
+  update_channel: "stable" | "beta";
+  auto_check_updates: boolean;
+  default_language: "de" | "en";
+  telemetry_enabled: boolean;
+  telemetry_notice: string;
+}
 
 const GROUPS: Array<{ key: SettingField["group"]; title: string; sub: string }> = [
   {
@@ -61,6 +100,14 @@ export default function AgentSettings({
   const [piperAcceptGpl, setPiperAcceptGpl] = useState(false);
   const [installingPiper, setInstallingPiper] = useState(false);
   const [testingPiper, setTestingPiper] = useState(false);
+  const [sysInfo, setSysInfo] = useState<GimelSystemInfo | null>(null);
+  const [sysSettings, setSysSettings] = useState<GimelSystemSettings | null>(null);
+  const [sysInstanceName, setSysInstanceName] = useState("Gimel");
+  const [sysChannel, setSysChannel] = useState<"stable" | "beta">("stable");
+  const [sysLang, setSysLang] = useState<"de" | "en">("de");
+  const [sysAutoCheck, setSysAutoCheck] = useState(true);
+  const [savingSys, setSavingSys] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   const apply = useCallback((next: SettingsData) => {
     setData(next);
@@ -82,18 +129,33 @@ export default function AgentSettings({
     } catch { /* optional */ }
   }, []);
 
+  const refreshSystem = useCallback(async () => {
+    try {
+      const [info, st] = await Promise.all([
+        api<GimelSystemInfo>("/api/system/info"),
+        api<GimelSystemSettings>("/api/system/settings"),
+      ]);
+      setSysInfo(info);
+      setSysSettings(st);
+      setSysInstanceName(st.instance_name);
+      setSysChannel(st.update_channel);
+      setSysLang(st.default_language);
+      setSysAutoCheck(st.auto_check_updates);
+    } catch { /* optional if endpoint unavailable */ }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       apply(await getAgentSettings());
-      await Promise.all([refreshSandbox(), refreshPiper()]);
+      await Promise.all([refreshSandbox(), refreshPiper(), refreshSystem()]);
       setError("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [apply, refreshSandbox, refreshPiper]);
+  }, [apply, refreshSandbox, refreshPiper, refreshSystem]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -541,6 +603,186 @@ export default function AgentSettings({
           )}
         </section>
       ))}
+
+      {sysInfo && (
+        <section className="settings-section" id="gimel-system-version">
+          <div className="settings-section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+            <div>
+              <h3>System & Version (Gimel)</h3>
+              <p>
+                <span className="mono">v{sysInfo.version}</span> · Engine <span className="mono">{sysInfo.engine_version}</span>
+                {sysInfo.git_commit ? <> · <span className="mono">{sysInfo.git_branch || "HEAD"}@{sysInfo.git_commit}</span></> : null}
+                {" · "}{sysInfo.mode === "production" ? "Production" : "Playground"}
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <Button
+                small
+                icon="clipboard"
+                text="Diagnose kopieren"
+                onClick={async () => {
+                  const dockerStr = sysInfo.docker.installed
+                    ? `${sysInfo.docker.running ? "aktiv" : "gestoppt"}${sysInfo.docker.version ? ` (${sysInfo.docker.version})` : ""}`
+                    : "nicht gefunden";
+                  const md = [
+                    `## ${sysInfo.app_name} Systemdiagnose`,
+                    `- **Version:** v${sysInfo.version} (Engine ${sysInfo.engine_version})`,
+                    `- **Modus:** ${sysInfo.mode}`,
+                    `- **Installation:** ${sysInfo.install_kind}`,
+                    `- **Python:** ${sysInfo.python_version}`,
+                    `- **Docker:** ${dockerStr}`,
+                    `- **Plattform:** ${sysInfo.platform}`,
+                    `- **Localnet:** ${sysInfo.localnet_only ? "aktiv" : "aus"} (${sysInfo.lan_ips.join(", ") || "localhost"})`,
+                  ].join("\n");
+                  try {
+                    await navigator.clipboard.writeText(md);
+                    setNotice("Systemdiagnose in Zwischenablage kopiert.");
+                  } catch {
+                    setError("Zwischenablage nicht verfügbar.");
+                  }
+                }}
+              />
+              <Button
+                small
+                icon="refresh"
+                text="Auf Updates prüfen"
+                loading={checkingUpdate}
+                onClick={async () => {
+                  setCheckingUpdate(true);
+                  try {
+                    const st = await api<{ update_available?: boolean; latest_tag?: string | null; latest_version?: string | null }>("/api/updates/status?force=true");
+                    await refreshSystem();
+                    setNotice(
+                      st.update_available
+                        ? `Update verfügbar: ${st.latest_tag || st.latest_version}`
+                        : `Gimel v${sysInfo.version} ist aktuell.`,
+                    );
+                  } catch (err) {
+                    setError(err instanceof ApiError ? err.message : String(err));
+                  } finally {
+                    setCheckingUpdate(false);
+                  }
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            <Tag minimal className="mono">Python {sysInfo.python_version}</Tag>
+            <Tag
+              minimal
+              intent={sysInfo.docker.installed ? (sysInfo.docker.running ? "success" : "warning") : "none"}
+            >
+              Docker: {sysInfo.docker.installed ? (sysInfo.docker.running ? `aktiv (${sysInfo.docker.version || "OK"})` : "gestoppt") : "nicht gefunden"}
+            </Tag>
+            <Tag minimal intent={sysInfo.localnet_only ? "success" : "warning"}>
+              {sysInfo.localnet_only ? "Localnet-Schutz aktiv" : "Netzwerk offen"}
+            </Tag>
+            {sysInfo.lan_ips.length > 0 && (
+              <Tag minimal className="mono">LAN: {sysInfo.lan_ips.join(", ")}</Tag>
+            )}
+            {sysInfo.update?.update_available && (
+              <Tag intent="warning" icon="cloud-download">
+                Update verfügbar: {sysInfo.update.latest_tag || `v${sysInfo.update.latest_version}`}
+              </Tag>
+            )}
+          </div>
+
+          {sysSettings && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 10 }}>
+              <FormGroup label="Instanzname" style={{ marginBottom: 0 }}>
+                <InputGroup
+                  value={sysInstanceName}
+                  disabled={!data.admin || savingSys}
+                  onChange={(e) => setSysInstanceName(e.currentTarget.value)}
+                />
+              </FormGroup>
+              <FormGroup label="Sprache" style={{ marginBottom: 0 }}>
+                <HTMLSelect
+                  fill
+                  value={sysLang}
+                  disabled={!data.admin || savingSys}
+                  onChange={(e) => setSysLang(e.currentTarget.value as "de" | "en")}
+                >
+                  <option value="de">Deutsch (de)</option>
+                  <option value="en">English (en)</option>
+                </HTMLSelect>
+              </FormGroup>
+              <FormGroup label="Update-Kanal" style={{ marginBottom: 0 }}>
+                <HTMLSelect
+                  fill
+                  value={sysChannel}
+                  disabled={!data.admin || savingSys}
+                  onChange={(e) => setSysChannel(e.currentTarget.value as "stable" | "beta")}
+                >
+                  <option value="stable">Stable</option>
+                  <option value="beta">Beta</option>
+                </HTMLSelect>
+              </FormGroup>
+            </div>
+          )}
+
+          {sysSettings && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              <Switch
+                checked={sysAutoCheck}
+                disabled={!data.admin || savingSys}
+                label="Automatische Update-Prüfung"
+                style={{ margin: 0 }}
+                onChange={(e) => setSysAutoCheck(e.currentTarget.checked)}
+              />
+              {data.admin && (
+                <Button
+                  small
+                  intent="primary"
+                  icon="floppy-disk"
+                  text="Systemeinstellungen speichern"
+                  loading={savingSys}
+                  onClick={async () => {
+                    setSavingSys(true);
+                    setError("");
+                    setNotice("");
+                    try {
+                      const updated = await api<GimelSystemSettings>("/api/system/settings", {
+                        method: "PATCH",
+                        body: JSON.stringify({
+                          instance_name: sysInstanceName.trim() || "Gimel",
+                          update_channel: sysChannel,
+                          default_language: sysLang,
+                          auto_check_updates: sysAutoCheck,
+                        }),
+                      });
+                      setSysSettings(updated);
+                      setNotice("Systemeinstellungen gespeichert.");
+                    } catch (err) {
+                      setError(err instanceof ApiError ? err.message : String(err));
+                    } finally {
+                      setSavingSys(false);
+                    }
+                  }}
+                />
+              )}
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, fontSize: 12, opacity: 0.85 }}>
+            <span>
+              {sysInfo.license} · <Tag minimal intent="success" icon="lock">{sysSettings?.telemetry_notice ?? "Keine Telemetrie — 100% lokal"}</Tag>
+            </span>
+            <span style={{ display: "flex", gap: 10 }}>
+              <a href={sysInfo.repo_url} target="_blank" rel="noopener noreferrer">
+                <Icon icon="git-repo" size={12} style={{ marginRight: 4 }} />GitHub
+              </a>
+              <a href={sysInfo.releases_url} target="_blank" rel="noopener noreferrer">
+                <Icon icon="tag" size={12} style={{ marginRight: 4 }} />Releases
+              </a>
+              <a href={sysInfo.website_url} target="_blank" rel="noopener noreferrer">
+                <Icon icon="globe" size={12} style={{ marginRight: 4 }} />FyreFly Systems
+              </a>
+            </span>
+          </div>
+        </section>
+      )}
 
       {data.admin && (
         <div className="settings-save">

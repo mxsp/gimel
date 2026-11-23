@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import platform
+import shutil
 import subprocess
 import sys
 import threading
@@ -21,6 +23,102 @@ from pathlib import Path
 from . import launcher
 from .localnet import local_lan_ips
 from .version import APP_VERSION
+
+
+def _detect_deps() -> dict:
+    """Detect Python 3.11+ and Docker availability/status."""
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    py_ok = sys.version_info >= (3, 11)
+
+    docker_ok = False
+    docker_version = ""
+    docker_running = False
+    if shutil.which("docker"):
+        try:
+            r = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=1.5, check=False)
+            if r.returncode == 0:
+                docker_ok = True
+                docker_version = (r.stdout or r.stderr or "").strip().splitlines()[0].strip()
+        except Exception:  # noqa: BLE001
+            pass
+        if docker_ok:
+            try:
+                chk = subprocess.run(["docker", "info"], capture_output=True, timeout=1.5, check=False)
+                docker_running = chk.returncode == 0
+            except Exception:  # noqa: BLE001
+                docker_running = False
+
+    return {
+        "python_ok": py_ok,
+        "python_version": py_ver,
+        "docker_ok": docker_ok,
+        "docker_version": docker_version,
+        "docker_running": docker_running,
+    }
+
+
+def _install_missing_deps(install_python: bool = True, install_docker: bool = True) -> dict:
+    """Best-effort installation of missing Python 3.12 / Docker."""
+    deps = _detect_deps()
+    need_py = install_python and not deps["python_ok"]
+    need_dk = install_docker and not deps["docker_ok"]
+    if not need_py and not need_dk:
+        return {"ok": True, "detail": "Python und Docker sind bereits vorhanden.", **deps}
+
+    notes: list[str] = []
+    if os.name == "nt":
+        candidates = [
+            Path(sys.executable).resolve().parent / "install-deps.ps1",
+            Path(__file__).resolve().parent.parent / "packaging" / "windows" / "install-deps.ps1",
+        ]
+        ps1 = next((p for p in candidates if p.is_file()), None)
+        if ps1 is not None:
+            cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1)]
+            if need_py:
+                cmd.append("-InstallPython")
+            if need_dk:
+                cmd.append("-InstallDocker")
+            subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+            notes.append("Windows-Abhängigkeitsinstallation ausgeführt.")
+        else:
+            if need_py and shutil.which("winget"):
+                subprocess.run(
+                    ["winget", "install", "--id", "Python.Python.3.12", "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+                    capture_output=True, timeout=300, check=False,
+                )
+            if need_dk and shutil.which("winget"):
+                subprocess.run(
+                    ["winget", "install", "--id", "Docker.DockerDesktop", "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+                    capture_output=True, timeout=300, check=False,
+                )
+    elif platform.system().lower() == "darwin":
+        if shutil.which("brew"):
+            if need_py:
+                subprocess.run(["brew", "install", "python@3.12"], capture_output=True, timeout=300, check=False)
+            if need_dk:
+                subprocess.run(["brew", "install", "--cask", "docker"], capture_output=True, timeout=300, check=False)
+        else:
+            notes.append("Homebrew nicht gefunden — bitte Python/Docker manuell installieren.")
+    else:
+        is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+        has_nopw_sudo = bool(shutil.which("sudo")) and subprocess.run(["sudo", "-n", "true"], capture_output=True, check=False).returncode == 0
+        if not is_root and not has_nopw_sudo:
+            notes.append("Für die automatische Installation unter Linux sind Root-/sudo-Rechte erforderlich.")
+        else:
+            prefix = [] if is_root else ["sudo"]
+            if need_py:
+                if shutil.which("apt-get"):
+                    subprocess.run(prefix + ["apt-get", "update", "-qq"], capture_output=True, timeout=120, check=False)
+                    subprocess.run(prefix + ["apt-get", "install", "-y", "python3", "python3-venv", "python3-pip"], capture_output=True, timeout=300, check=False)
+                elif shutil.which("dnf"):
+                    subprocess.run(prefix + ["dnf", "install", "-y", "python3", "python3-pip"], capture_output=True, timeout=300, check=False)
+            if need_dk:
+                subprocess.run(prefix + ["sh", "-c", "curl -fsSL https://get.docker.com | sh"], capture_output=True, timeout=300, check=False)
+
+    after = _detect_deps()
+    ok = (not need_py or after["python_ok"]) and (not need_dk or after["docker_ok"])
+    detail = " ".join(notes) if notes else ("Komponenten installiert." if ok else "Installation teilweise abgeschlossen oder manuelle Rechte nötig.")
+    return {"ok": ok, "detail": detail, **after}
 
 HTML = r"""<!doctype html>
 <html lang="de">
@@ -78,6 +176,15 @@ HTML = r"""<!doctype html>
     padding: 10px 12px; font-size: 12.5px; color: var(--muted);
   }
   .info code { color: var(--accent-hi); }
+  .deps-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+    border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: #141920; border: 1px solid var(--line); color: var(--text);
+  }
+  .badge.ok { border-color: #1e564d; color: var(--ok); }
+  .badge.warn { border-color: #785314; color: #f59e0b; }
+  .btn-sm { padding: 6px 10px; font-size: 12px; }
   .err { color: var(--err); font-size: 13px; }
   .done {
     background: #102a24; border: 1px solid #1d5d50; border-radius: 12px; padding: 16px;
@@ -104,6 +211,7 @@ HTML = r"""<!doctype html>
 
   <form id="form" class="grid">
     <div class="info" id="lan-box">Lokales Netzwerk wird erkannt…</div>
+    <div class="info" id="deps-box">System-Komponenten werden geprüft…</div>
 
     <div class="two">
       <label>Startmodus
@@ -151,11 +259,44 @@ $("mode").onchange = () => {
   $("admin-box").style.display = $("mode").value === "playground" ? "none" : "grid";
 };
 
+function renderDeps(d) {
+  const pyBadge = `<span class="badge ${d.python_ok ? "ok" : "warn"}">Python ${d.python_version || "?"}</span>`;
+  const dkText = d.docker_ok ? (d.docker_running ? `${d.docker_version} · aktiv` : `${d.docker_version}`) : "nicht installiert";
+  const dkBadge = `<span class="badge ${d.docker_ok ? "ok" : "warn"}">Docker: ${dkText}</span>`;
+  const needInstall = !d.python_ok || !d.docker_ok;
+  const btn = needInstall ? `<button type="button" id="install-deps-btn" class="btn-sm">Fehlende Komponenten installieren</button>` : "";
+  $("deps-box").innerHTML = `<div class="deps-row"><div class="row">${pyBadge}${dkBadge}</div>${btn}</div><div id="deps-note" style="margin-top:6px;display:none;"></div>`;
+  if (needInstall) {
+    $("install-deps-btn").onclick = async () => {
+      const b = $("install-deps-btn");
+      b.disabled = true;
+      b.textContent = "Installiere…";
+      try {
+        const res = await fetch("/api/install-deps", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ install_python: !d.python_ok, install_docker: !d.docker_ok }),
+        });
+        const out = await res.json();
+        renderDeps(out);
+        if (out.detail) {
+          $("deps-note").style.display = "block";
+          $("deps-note").textContent = out.detail;
+        }
+      } catch (err) {
+        b.disabled = false;
+        b.textContent = "Fehlende Komponenten installieren";
+      }
+    };
+  }
+}
+
 fetch("/api/info").then(r => r.json()).then(d => {
   $("ver-pill").textContent = `v${d.version}`;
   $("lan-box").innerHTML = d.lan_ips.length
     ? `Erkannte LAN-Adresse: <code>${d.lan_ips[0]}</code> · Nur lokales Netzwerk (Localnet-Schutz aktiv)`
     : `Lokal auf diesem Computer (<code>127.0.0.1</code>) · Localnet-Schutz aktiv`;
+  renderDeps(d);
 });
 
 $("form").onsubmit = async (e) => {
@@ -230,11 +371,25 @@ def run_setup_ui(*, port: int = 8099, base_dir: Path | None = None, no_browser: 
                 self.wfile.write(body)
                 return
             if self.path == "/api/info":
-                self._json({"version": APP_VERSION, "lan_ips": local_lan_ips(), "data_dir": str(root_dir)})
+                self._json({
+                    "version": APP_VERSION,
+                    "lan_ips": local_lan_ips(),
+                    "data_dir": str(root_dir),
+                    **_detect_deps(),
+                })
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
+            if self.path == "/api/install-deps":
+                length = int(self.headers.get("Content-Length") or 0)
+                data = json.loads(self.rfile.read(min(length, 32768)).decode("utf-8") or "{}")
+                res = _install_missing_deps(
+                    install_python=bool(data.get("install_python", True)),
+                    install_docker=bool(data.get("install_docker", True)),
+                )
+                self._json(res)
+                return
             if self.path != "/api/finish":
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return

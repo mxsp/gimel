@@ -58,6 +58,9 @@ pause
         $IsccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
     }
     if ($IsccPath) {
+        if (-not (Test-Path "$Root\packaging\windows\install-deps.ps1")) {
+            throw "Missing $Root\packaging\windows\install-deps.ps1"
+        }
         Write-Host "==> 4/4 Building Windows UI Installer (Gimel-Setup-x64.exe) via Inno Setup ($IsccPath)"
         $VerLine = Select-String -Path "$Root\gimel\version.py" -Pattern 'APP_VERSION\s*=\s*"([^"]+)"'
         $AppVer = if ($VerLine) { $VerLine.Matches[0].Groups[1].Value } else { "0.2.2" }
