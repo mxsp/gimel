@@ -783,6 +783,7 @@ interface UpdateApplyData {
   from_version: string;
   to_version: string;
   restart_required: boolean;
+  restarting?: boolean;
   detail: string;
   command_hint: string;
 }
@@ -798,7 +799,41 @@ function UpdatesPanel() {
   const [info, setInfo] = useState<UpdateStatusData | null>(null);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [result, setResult] = useState<UpdateApplyData | null>(null);
+  const pollRef = useRef<number | null>(null);
+
+  const stopPoll = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => stopPoll(), [stopPoll]);
+
+  const waitForRestart = useCallback(() => {
+    setRestarting(true);
+    let sawDown = false;
+    let ticks = 0;
+    stopPoll();
+    pollRef.current = window.setInterval(async () => {
+      ticks += 1;
+      try {
+        const r = await fetch("/api/health", { cache: "no-store" });
+        if (r.ok && (sawDown || ticks >= 4)) {
+          stopPoll();
+          window.location.reload();
+        }
+      } catch {
+        sawDown = true;
+      }
+      if (ticks >= 45) {
+        stopPoll();
+        setRestarting(false);
+      }
+    }, 1000);
+  }, [stopPoll]);
 
   const check = useCallback(async (force = false) => {
     setLoading(true);
@@ -821,11 +856,15 @@ function UpdatesPanel() {
     try {
       const res = await api<UpdateApplyData>("/api/updates/apply", {
         method: "POST",
-        body: JSON.stringify({ tag: info.latest_tag, rebuild_web: true }),
+        body: JSON.stringify({ tag: info.latest_tag, rebuild_web: true, auto_restart: true }),
       });
       setResult(res);
-      if (res.ok) {
+      if (res.ok && res.restarting) {
+        toastSuccess(`Update auf v${res.to_version} abgeschlossen — Gimel startet automatisch neu…`);
+        waitForRestart();
+      } else if (res.ok) {
         toastSuccess(res.detail || "Update abgeschlossen.");
+        check(true);
       } else {
         toastError(res.detail || "Update nicht automatisch anwendbar.");
       }
@@ -835,6 +874,20 @@ function UpdatesPanel() {
       setApplying(false);
     }
   };
+
+  if (restarting) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: 20 }}>
+        <Spinner size={30} />
+        <div>
+          <strong>Gimel startet automatisch neu…</strong>
+          <div className="sub" style={{ marginTop: 4 }}>
+            Die neue Version wird geladen. Diese Seite lädt in wenigen Sekunden von selbst neu.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!info && loading) return <Spinner size={28} />;
   if (!info) {
@@ -889,7 +942,7 @@ function UpdatesPanel() {
             <Button
               intent="primary"
               icon="cloud-download"
-              text={info.install_kind === "docker" ? "Update-Befehl anzeigen" : `Auf ${info.latest_tag} aktualisieren`}
+              text={info.install_kind === "docker" ? "Update-Befehl anzeigen" : `Auf ${info.latest_tag} aktualisieren & neu starten`}
               loading={applying}
               onClick={apply}
             />

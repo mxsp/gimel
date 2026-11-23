@@ -1,5 +1,5 @@
-import { Button, Callout, Dialog, DialogBody, DialogFooter, Icon, Tag } from "@blueprintjs/core";
-import { useCallback, useEffect, useState } from "react";
+import { Button, Callout, Dialog, DialogBody, DialogFooter, Icon, Spinner, Tag } from "@blueprintjs/core";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtDateTime } from "../api";
 import { toastError, toastSuccess } from "../toast";
 
@@ -24,6 +24,7 @@ interface UpdateApplyData {
   from_version: string;
   to_version: string;
   restart_required: boolean;
+  restarting?: boolean;
   detail: string;
   command_hint: string;
 }
@@ -35,12 +36,47 @@ const KIND_LABEL: Record<string, string> = {
   package: "Python-Paket",
 };
 
+/** Left-sidebar Update button — automatically hidden when Gimel is up to date. */
 export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
   const [info, setInfo] = useState<UpdateStatusData | null>(null);
   const [open, setOpen] = useState(false);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [result, setResult] = useState<UpdateApplyData | null>(null);
+  const pollRef = useRef<number | null>(null);
+
+  const stopPoll = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => stopPoll(), [stopPoll]);
+
+  const waitForRestartAndReload = useCallback(() => {
+    setRestarting(true);
+    let sawDown = false;
+    let ticks = 0;
+    stopPoll();
+    pollRef.current = window.setInterval(async () => {
+      ticks += 1;
+      try {
+        const r = await fetch("/api/health", { cache: "no-store" });
+        if (r.ok && (sawDown || ticks >= 4)) {
+          stopPoll();
+          window.location.reload();
+        }
+      } catch {
+        sawDown = true;
+      }
+      if (ticks >= 45) {
+        stopPoll();
+        setRestarting(false);
+      }
+    }, 1000);
+  }, [stopPoll]);
 
   const check = useCallback(async (force = false) => {
     setChecking(true);
@@ -67,11 +103,18 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
     try {
       const res = await api<UpdateApplyData>("/api/updates/apply", {
         method: "POST",
-        body: JSON.stringify({ tag: info.latest_tag, rebuild_web: true }),
+        body: JSON.stringify({ tag: info.latest_tag, rebuild_web: true, auto_restart: true }),
       });
       setResult(res);
-      if (res.ok) toastSuccess(res.detail || "Update installiert.");
-      else toastError(res.detail || "Update nicht automatisch anwendbar.");
+      if (res.ok && res.restarting) {
+        toastSuccess(`Update auf v${res.to_version} installiert — Gimel startet neu…`);
+        waitForRestartAndReload();
+      } else if (res.ok) {
+        toastSuccess(res.detail || "Update installiert.");
+        await check(true);
+      } else {
+        toastError(res.detail || "Update nicht automatisch anwendbar.");
+      }
     } catch (e: any) {
       toastError(e.message ?? "Update fehlgeschlagen.");
     } finally {
@@ -80,39 +123,46 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
   };
 
   const hasUpdate = info?.update_available === true;
-  const label = hasUpdate
-    ? `Update ${info?.latest_tag ?? ""}`
-    : `Updates${info?.current_version ? ` · v${info.current_version}` : ""}`;
+
+  // Automatically remove the sidebar button whenever no new update is available.
+  if (!hasUpdate && !open) {
+    return null;
+  }
 
   return (
     <>
-      <button
-        type="button"
-        className={`rail-update-btn${hasUpdate ? " is-available" : ""}`}
-        onClick={() => {
-          setOpen(true);
-          if (!info) check(true);
-        }}
-        title={
-          hasUpdate
-            ? `Neues GitHub Release verfügbar: ${info?.latest_tag}`
-            : "Auf neue GitHub Releases (mxsp/gimel) prüfen"
-        }
-      >
-        <Icon icon="cloud-download" size={13} aria-hidden="true" />
-        <span className="rail-update-label">{label}</span>
-        {hasUpdate && <span className="rail-update-dot" aria-label="Update verfügbar" />}
-      </button>
+      {hasUpdate && (
+        <button
+          type="button"
+          className="rail-update-btn is-available"
+          onClick={() => setOpen(true)}
+          title={`Neues Gimel Release verfügbar: ${info?.latest_tag}`}
+        >
+          <Icon icon="cloud-download" size={13} aria-hidden="true" />
+          <span className="rail-update-label">Update {info?.latest_tag ?? ""}</span>
+          <span className="rail-update-dot" aria-label="Update verfügbar" />
+        </button>
+      )}
 
       <Dialog
         isOpen={open}
-        onClose={() => setOpen(false)}
-        title="Gimel Updates (GitHub Releases)"
+        onClose={() => { if (!restarting) setOpen(false); }}
+        title="Gimel Update verfügbar"
         icon="cloud-download"
         style={{ width: 520, maxWidth: "94vw" }}
       >
         <DialogBody>
-          {!info ? (
+          {restarting ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 4px" }}>
+              <Spinner size={28} />
+              <div>
+                <strong>Gimel startet automatisch neu…</strong>
+                <div className="sub" style={{ marginTop: 4 }}>
+                  Die neue Version wird geladen. Diese Seite aktualisiert sich in wenigen Sekunden selbst.
+                </div>
+              </div>
+            </div>
+          ) : !info ? (
             <p className="sub">Prüfe GitHub Releases…</p>
           ) : (
             <>
@@ -128,7 +178,7 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
                   {info.error}
                 </Callout>
               ) : info.update_available ? (
-                <Callout intent="primary" title={`Neues Release verfügbar: ${info.latest_tag}`}>
+                <Callout intent="primary" title={`Neues Release: ${info.latest_tag}`}>
                   <p style={{ margin: "4px 0" }}>
                     Installiert: <b className="mono">v{info.current_version}</b> → Neu:{" "}
                     <b className="mono">{info.latest_tag}</b>
@@ -143,7 +193,7 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
                 </Callout>
               ) : (
                 <Callout intent="success" title={`Gimel v${info.current_version} ist aktuell`}>
-                  Neuestes Release auf GitHub: <b className="mono">{info.latest_tag ?? `v${info.current_version}`}</b>.
+                  Es steht kein weiteres Update aus.
                 </Callout>
               )}
 
@@ -163,7 +213,7 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
               {info.release_notes && (
                 <div style={{ marginTop: 12 }}>
                   <div className="sub" style={{ marginBottom: 4, fontWeight: 600 }}>
-                    Release Notes ({info.release_name || info.latest_tag})
+                    Neuerungen ({info.release_name || info.latest_tag})
                   </div>
                   <pre className="ui-json" style={{ whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto", margin: 0 }}>
                     {info.release_notes}
@@ -176,22 +226,24 @@ export default function SidebarUpdateButton({ isAdmin }: { isAdmin: boolean }) {
         <DialogFooter
           actions={
             <>
-              {info?.release_url && (
+              {info?.release_url && !restarting && (
                 <a className="bp5-button bp5-minimal" href={info.release_url} target="_blank" rel="noreferrer">
                   GitHub
                 </a>
               )}
-              <Button icon="refresh" text="Prüfen" loading={checking} onClick={() => check(true)} />
-              {info?.update_available && isAdmin && (
+              {!restarting && (
+                <Button icon="refresh" text="Prüfen" loading={checking} onClick={() => check(true)} />
+              )}
+              {info?.update_available && isAdmin && !restarting && (
                 <Button
                   intent="primary"
                   icon="cloud-download"
-                  text={`Auf ${info.latest_tag} aktualisieren`}
+                  text={info.install_kind === "docker" ? "Update-Befehl anzeigen" : "Aktualisieren & neu starten"}
                   loading={applying}
                   onClick={apply}
                 />
               )}
-              <Button text="Schließen" onClick={() => setOpen(false)} />
+              {!restarting && <Button text="Schließen" onClick={() => setOpen(false)} />}
             </>
           }
         />

@@ -25,7 +25,7 @@ import webbrowser
 from pathlib import Path
 from typing import Literal
 
-Mode = Literal["playground", "production", "both"]
+Mode = Literal["playground", "production", "both", "setup-ui"]
 
 DEFAULT_HOST = "0.0.0.0"
 PLAYGROUND_PORT = 8040
@@ -328,9 +328,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=["playground", "production", "both"],
+        choices=["playground", "production", "both", "setup-ui"],
         default=os.environ.get("GIMEL_MODE") or None,
-        help="Betriebsmodus: playground (Demo), production (Echtbetrieb), both (beide parallel)",
+        help="Betriebsmodus: playground (Demo), production (Echtbetrieb), both (beide parallel), setup-ui (Einrichtungs-Assistent)",
     )
     parser.add_argument("--host", default=os.environ.get("GIMEL_HOST", DEFAULT_HOST))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GIMEL_PORT", "0") or 0))
@@ -345,6 +345,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     mode: Mode = args.mode or _pick_mode_interactive()
     base_dir = Path(args.data_dir).expanduser() if args.data_dir else _default_base_dir()
+
+    if mode == "setup-ui":
+        from . import setup_ui
+
+        return setup_ui.run_setup_ui(
+            port=args.port or 8099,
+            base_dir=base_dir,
+            no_browser=args.no_browser,
+        )
 
     if mode == "both":
         pg_port = args.port or PLAYGROUND_PORT

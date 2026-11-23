@@ -77,14 +77,18 @@ Then start Gimel:
 .venv/bin/gimel production --host 0.0.0.0       # Share over your local LAN (localnet-only enforced)
 ```
 
-### Option 2: Standalone Executable (Linux Binary / Windows `.exe`)
+### Option 3: Windows Installer (`Gimel-Setup-x64.exe`) & Standalone Binaries
 
-Download from [GitHub Releases](https://github.com/mxsp/gimel/releases) or build locally (`./packaging/build-exe.sh` on Linux, `.\packaging\build-exe.ps1` on Windows):
+Download directly from [GitHub Releases](https://github.com/mxsp/gimel/releases):
+
+- **Windows Installer (`Gimel-Setup-x64.exe`):** Modern setup wizard with Start Menu/Desktop shortcuts, optional Private-LAN Firewall rule (`8040`–`8041`), uninstaller, and automatic launch into the **Gimel Setup UI** (`gimel.exe --mode setup-ui`).
+- **Portable Archives (`gimel-windows-x64.zip` / `gimel-linux-x64.tar.gz`):** Extract and run without installing:
 
 ```bash
-./packaging/dist/gimel --mode playground   # Sandbox on http://127.0.0.1:8040/app
-./packaging/dist/gimel --mode production   # Clean production on http://127.0.0.1:8041/app
-./packaging/dist/gimel --mode both         # Run both side by side
+./gimel --mode setup-ui     # Guided browser setup wizard
+./gimel --mode playground   # Sandbox on http://127.0.0.1:8040/app
+./gimel --mode production   # Clean production on http://127.0.0.1:8041/app
+./gimel --mode both         # Run both side by side
 ```
 
 ### Option 3: Docker Compose (Playground + Production + PostgreSQL)

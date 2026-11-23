@@ -24,6 +24,12 @@ for rel in (
     if src.is_dir():
         datas.append((str(src), rel))
 
+laufkarte_js = ROOT / "gimel" / "admin" / "laufkarte.js"
+if laufkarte_js.is_file():
+    datas.append((str(laufkarte_js), "gimel/admin"))
+
+win_ico = ROOT / "packaging" / "windows" / "gimel.ico"
+
 # Include timezone / cert / ezdxf package data if present
 for pkg in ("certifi", "ezdxf"):
     try:
@@ -74,5 +80,6 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
+    icon=str(win_ico) if win_ico.is_file() else None,
     disable_windowed_traceback=False,
 )

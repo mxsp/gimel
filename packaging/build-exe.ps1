@@ -45,8 +45,26 @@ pause
 pause
 "@ | Set-Content -Encoding ASCII "$Root\packaging\dist\Start-Gimel-Both.bat"
 
+    @"
+@echo off
+"%~dp0gimel.exe" --mode setup-ui %*
+"@ | Set-Content -Encoding ASCII "$Root\packaging\dist\Start-Gimel-Setup.bat"
+
+    $Iscc = Get-Command iscc -ErrorAction SilentlyContinue
+    if (-not $Iscc -and (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+        $Iscc = Get-Item "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    }
+    if ($Iscc) {
+        Write-Host "==> 4/4 Building Windows UI Installer (Gimel-Setup-x64.exe) via Inno Setup"
+        $VerLine = Select-String -Path "$Root\gimel\version.py" -Pattern 'APP_VERSION\s*=\s*"([^"]+)"'
+        $AppVer = if ($VerLine) { $VerLine.Matches[0].Groups[1].Value } else { "0.2.2" }
+        & $Iscc.FullName "/DAppVersion=$AppVer" "$Root\packaging\windows\gimel-setup.iss"
+    } else {
+        Write-Host "Note: Inno Setup (iscc) not found; skipped Gimel-Setup-x64.exe."
+    }
+
     Write-Host ""
-    Write-Host "Done! Built $Root\packaging\dist\gimel.exe + Playground/Production .bat launchers."
+    Write-Host "Done! Built $Root\packaging\dist\gimel.exe + launchers (+ Gimel-Setup-x64.exe if Inno Setup installed)."
 } finally {
     Pop-Location
 }

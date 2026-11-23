@@ -14,10 +14,12 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -72,6 +74,7 @@ class UpdateResult:
     from_version: str
     to_version: str
     restart_required: bool = False
+    restarting: bool = False
     detail: str = ""
     command_hint: str = ""
 
@@ -157,7 +160,7 @@ def _match_platform_asset(assets: list[ReleaseAsset]) -> ReleaseAsset | None:
 
     for a in assets:
         low = a.name.lower()
-        if sys_name == "windows" and "windows" in low and (low.endswith(".zip") or low.endswith(".exe")):
+        if sys_name == "windows" and "windows" in low and low.endswith(".zip") and "setup" not in low:
             return a
         if sys_name == "linux" and "linux" in low and (low.endswith(".tar.gz") or low.endswith(".tgz") or low == "gimel"):
             return a
@@ -166,6 +169,8 @@ def _match_platform_asset(assets: list[ReleaseAsset]) -> ReleaseAsset | None:
     if wanted:
         for a in assets:
             low = a.name.lower()
+            if "setup" in low:
+                continue
             if any(w in low for w in wanted):
                 return a
     return None
@@ -368,7 +373,7 @@ def _apply_binary_update(info: UpdateStatus) -> UpdateResult:
                 from_version=APP_VERSION,
                 to_version=info.latest_version or APP_VERSION,
                 restart_required=True,
-                detail=f"Update auf {info.latest_tag} installiert (Backup: {backup.name}). Bitte Gimel neu starten.",
+                detail=f"Gimel wurde auf {info.latest_tag} aktualisiert.",
             )
         return UpdateResult(
             ok=True,
@@ -376,7 +381,7 @@ def _apply_binary_update(info: UpdateStatus) -> UpdateResult:
             from_version=APP_VERSION,
             to_version=info.latest_version or APP_VERSION,
             restart_required=True,
-            detail=f"Update {info.latest_tag} bereitgestellt unter {staged.name}. Gimel beenden und {staged.name} nach {exe_path.name} umbenennen.",
+            detail=f"Update {info.latest_tag} vorbereitet — Gimel übernimmt die neue Version beim Neustart automatisch.",
         )
 
 
@@ -413,7 +418,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
             install_kind="git",
             from_version=APP_VERSION,
             to_version=tag.lstrip("v"),
-            detail="Lokale ungespeicherte Änderungen im Git-Repository — bitte zuerst committen oder stashen.",
+            detail="Lokale ungespeicherte Änderungen im Ordner — bitte zuerst speichern oder verwerfen.",
             command_hint=f"git fetch --tags origin && git checkout {tag}",
         )
 
@@ -430,7 +435,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
             install_kind="git",
             from_version=APP_VERSION,
             to_version=tag.lstrip("v"),
-            detail=f"Git fetch fehlgeschlagen: {(fetch.stderr or fetch.stdout).strip()}",
+            detail=f"Herunterladen von {tag} fehlgeschlagen: {(fetch.stderr or fetch.stdout).strip()}",
         )
 
     co = subprocess.run(
@@ -445,32 +450,34 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
             install_kind="git",
             from_version=APP_VERSION,
             to_version=tag.lstrip("v"),
-            detail=f"Git checkout fehlgeschlagen: {(co.stderr or co.stdout).strip()}",
+            detail=f"Wechsel auf {tag} fehlgeschlagen: {(co.stderr or co.stdout).strip()}",
         )
 
-    # Update Python editable package in current environment
+    # Refresh editable metadata cleanly without requiring build-isolation or failing offline.
     pip_res = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-e", str(root), "--no-build-isolation", "--quiet"],
+        [sys.executable, "-m", "pip", "install", "-e", str(root), "--no-deps", "--no-build-isolation", "--quiet"],
         capture_output=True,
         text=True,
         check=False,
     )
-    notes = [f"Repository auf {tag} aktualisiert."]
     if pip_res.returncode != 0:
-        notes.append("Hinweis: Python-Abhängigkeiten bitte manuell aktualisieren (`pip install -e .`).")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", str(root), "--quiet"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
     if rebuild_web and shutil.which("npm"):
         for web_dir in (root / "web", root / "agentlab" / "web"):
-            if (web_dir / "package.json").is_file():
-                b = subprocess.run(
+            if (web_dir / "package.json").is_file() and (web_dir / "node_modules").is_dir():
+                subprocess.run(
                     ["npm", "run", "build"],
                     cwd=str(web_dir),
                     capture_output=True,
                     text=True,
                     check=False,
                 )
-                if b.returncode != 0:
-                    notes.append(f"Frontend-Build in {web_dir.name} fehlgeschlagen.")
 
     clear_cache()
     return UpdateResult(
@@ -479,11 +486,100 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
         from_version=APP_VERSION,
         to_version=tag.lstrip("v"),
         restart_required=True,
-        detail=" ".join(notes) + " Bitte Gimel neu starten.",
+        detail=f"Gimel wurde auf {tag} aktualisiert.",
     )
 
 
-def apply_update(*, target_tag: str | None = None, rebuild_web: bool = True) -> UpdateResult:
+def _restart_command() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *sys.argv[1:]]
+    argv0 = Path(sys.argv[0]) if sys.argv else Path("")
+    # If invoked via console entrypoint (e.g. .venv/bin/gimel serve ...), re-invoke it directly.
+    if argv0.is_file() and argv0.name.startswith("gimel"):
+        return [str(argv0), *sys.argv[1:]]
+    return [sys.executable, *sys.argv]
+
+
+def schedule_restart(delay_seconds: float = 1.1) -> bool:
+    """Gracefully stop this process and launch the updated Gimel process on the same args.
+
+    Spawns a tiny detached helper so the current server finishes sending its HTTP
+    response and frees the listening socket before the new process binds. On
+    Windows frozen binaries, the helper also swaps ``gimel.exe.new`` into place.
+    """
+    if detect_install_kind() == "docker":
+        return False
+    cmd = _restart_command()
+    if not cmd:
+        return False
+    pid = os.getpid()
+    is_win = platform.system().lower() == "windows"
+    exe_path = Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
+    staged = exe_path.with_suffix(exe_path.suffix + ".new") if exe_path else None
+
+    def _trigger() -> None:
+        time.sleep(max(0.4, delay_seconds))
+        try:
+            if is_win and staged and staged.is_file() and exe_path:
+                # Batch helper waits for current pid to exit, swaps .new -> .exe, starts Gimel.
+                bat = Path(tempfile.gettempdir()) / f"gimel-restart-{pid}.cmd"
+                quoted = " ".join(f'"{c}"' for c in cmd)
+                bat.write_text(
+                    "@echo off\r\n"
+                    ":wait\r\n"
+                    f"tasklist /FI \"PID eq {pid}\" 2>NUL | find \"{pid}\" >NUL\r\n"
+                    "if not errorlevel 1 (timeout /t 1 /nobreak >NUL & goto wait)\r\n"
+                    f"move /Y \"{exe_path}\" \"{exe_path}.bak\" >NUL 2>&1\r\n"
+                    f"move /Y \"{staged}\" \"{exe_path}\" >NUL 2>&1\r\n"
+                    f"start \"\" {quoted}\r\n"
+                    "del \"%~f0\" >NUL 2>&1\r\n",
+                    encoding="utf-8",
+                )
+                subprocess.Popen(
+                    ["cmd", "/c", str(bat)],
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                helper = (
+                    "import os, subprocess, sys, time\n"
+                    f"pid = {pid}\n"
+                    "for _ in range(40):\n"
+                    "    try:\n"
+                    "        os.kill(pid, 0)\n"
+                    "        time.sleep(0.25)\n"
+                    "    except OSError:\n"
+                    "        break\n"
+                    "time.sleep(0.3)\n"
+                    f"subprocess.Popen({cmd!r}, cwd={os.getcwd()!r}, start_new_session=True, "
+                    "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                )
+                kwargs: dict = {
+                    "stdout": subprocess.DEVNULL,
+                    "stderr": subprocess.DEVNULL,
+                }
+                if is_win:
+                    kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                else:
+                    kwargs["start_new_session"] = True
+                subprocess.Popen([sys.executable, "-c", helper], **kwargs)
+        finally:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                os._exit(0)
+
+    threading.Thread(target=_trigger, daemon=True, name="gimel-auto-restart").start()
+    return True
+
+
+def apply_update(
+    *,
+    target_tag: str | None = None,
+    rebuild_web: bool = True,
+    auto_restart: bool = False,
+) -> UpdateResult:
     info = check_for_update(force=True)
     kind = info.install_kind
     target_ver = (target_tag or info.latest_tag or APP_VERSION).lstrip("v")
@@ -510,16 +606,22 @@ def apply_update(*, target_tag: str | None = None, rebuild_web: bool = True) -> 
         )
 
     if kind == "binary":
-        return _apply_binary_update(info)
-    if kind == "git":
-        return _apply_git_update(info, target_tag=target_tag, rebuild_web=rebuild_web)
+        res = _apply_binary_update(info)
+    elif kind == "git":
+        res = _apply_git_update(info, target_tag=target_tag, rebuild_web=rebuild_web)
+    else:
+        tag = target_tag or info.latest_tag or "main"
+        res = UpdateResult(
+            ok=False,
+            install_kind="package",
+            from_version=APP_VERSION,
+            to_version=target_ver,
+            detail="Paket-Installation erkannt — bitte über pip aktualisieren.",
+            command_hint=f"pip install --upgrade git+https://github.com/{info.repo}.git@{tag}",
+        )
 
-    tag = target_tag or info.latest_tag or "main"
-    return UpdateResult(
-        ok=False,
-        install_kind="package",
-        from_version=APP_VERSION,
-        to_version=target_ver,
-        detail="Paket-Installation erkannt — bitte über pip aktualisieren.",
-        command_hint=f"pip install --upgrade git+https://github.com/{info.repo}.git@{tag}",
-    )
+    if res.ok and res.restart_required and auto_restart:
+        if schedule_restart():
+            res.restarting = True
+            res.detail = f"Gimel wurde auf v{res.to_version} aktualisiert und startet automatisch neu…"
+    return res
