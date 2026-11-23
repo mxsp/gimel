@@ -1,0 +1,2 @@
+# gimel
+Small Agentic ERP
