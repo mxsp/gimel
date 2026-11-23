@@ -44,7 +44,7 @@ LOCKOUT_MINUTES = 15
 #: 2026-11 antwortete ein pausiertes Konto 423 „Konto gesperrt", eine
 #: unbekannte Adresse 401: wer fünfmal falsch tippte, wusste danach, ob es das
 #: Konto gibt (Sicherheitsprüfung 2026-11-13, F1).
-LOGIN_FAILED = ("E-Mail oder Passwort falsch. Nach mehreren Fehlversuchen "
+LOGIN_FAILED = ("Benutzername oder Passwort falsch. Nach mehreren Fehlversuchen "
                 "pausiert die Anmeldung 15 Minuten.")
 
 #: Höchstens eine Pausen-Mail je Konto und Stunde: wer die Sperre absichtlich
@@ -149,8 +149,24 @@ def check_password_strength(password: str, *, email: str = "", name: str = "") -
                 detail="Das Passwort darf nicht aus E-Mail oder Name bestehen.")
 
 
-def _set_refresh_cookie(resp: Response, token: str, max_age: int | None = None) -> None:
-    secure = settings.is_production()
+def _set_refresh_cookie(
+    resp: Response,
+    token: str,
+    max_age: int | None = None,
+    request: Request | None = None,
+) -> None:
+    s = get_settings()
+    if s.localnet_only:
+        is_https = (
+            request is not None
+            and (
+                request.url.scheme == "https"
+                or request.headers.get("x-forwarded-proto", "").lower() == "https"
+            )
+        )
+        secure = is_https
+    else:
+        secure = s.is_production()
     resp.set_cookie(
         REFRESH_COOKIE,
         token,
@@ -158,7 +174,7 @@ def _set_refresh_cookie(resp: Response, token: str, max_age: int | None = None) 
         secure=secure,
         samesite="lax",
         path="/api/auth",
-        max_age=max_age if max_age is not None else settings.refresh_token_days * 86400,
+        max_age=max_age if max_age is not None else s.refresh_token_days * 86400,
     )
 
 
@@ -236,7 +252,7 @@ def register(
     )
     db.commit()
     raw, sid = _create_session(db, user, request)
-    _set_refresh_cookie(response, raw)
+    _set_refresh_cookie(response, raw, request=request)
     db.refresh(user)
     return Token(
         access_token=create_access_token(user, sid),
@@ -328,7 +344,7 @@ def login(
     )
     db.commit()
     raw, sid = _create_session(db, user, request)
-    _set_refresh_cookie(response, raw)
+    _set_refresh_cookie(response, raw, request=request)
     return Token(
         access_token=create_access_token(user, sid),
         role=user.role,
@@ -592,7 +608,7 @@ def login_second_factor(
     user.last_login = datetime.now(timezone.utc)
     db.commit()
     raw, sid = _create_session(db, user, request)
-    _set_refresh_cookie(response, raw)
+    _set_refresh_cookie(response, raw, request=request)
     return Token(
         access_token=create_access_token(user, sid),
         role=user.role,
@@ -640,7 +656,7 @@ def refresh(
     )
     db.add(new_sess)
     db.commit()
-    _set_refresh_cookie(response, new_raw, max_age=int((exp - datetime.now(timezone.utc)).total_seconds()) if (gimel and exp) else None)
+    _set_refresh_cookie(response, new_raw, max_age=int((exp - datetime.now(timezone.utc)).total_seconds()) if (gimel and exp) else None, request=request)
     return Token(
         access_token=create_access_token(user, new_sess.id),
         role=user.role,

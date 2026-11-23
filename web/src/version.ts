@@ -11,6 +11,8 @@ export interface AppVersion {
   demo: boolean;
   /** Der Assistent ist in dieser Instanz eingebaut (/api/agent vorhanden). */
   agent: boolean;
+  /** Zugriff auf das lokale Netzwerk (Loopback / LAN) beschränkt. */
+  localnetOnly: boolean;
   /** null, wenn der Abruf nichts Brauchbares geliefert hat. */
   features: string[] | null;
   /** Registrierte Kern- und semi-externe Module dieser Instanz. */
@@ -28,10 +30,11 @@ export function loadVersion(): Promise<AppVersion> {
       return {
         demo: v?.demo === true,
         agent: v?.agent === true,
+        localnetOnly: v?.localnet_only !== false,
         features: Array.isArray(v?.features) ? [...v.features as string[], ...(v?.vision ? ["vision"] : [])] : null,
         modules,
       };
     })
-    .catch(() => ({ demo: false, agent: false, features: null }));
+    .catch(() => ({ demo: false, agent: false, localnetOnly: true, features: null }));
   return pending;
 }

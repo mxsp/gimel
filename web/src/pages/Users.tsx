@@ -1,419 +1,631 @@
-import { Alert, Button, Callout, Dialog, DialogBody, DialogFooter, Drawer, HTMLSelect, HTMLTable, InputGroup, Menu, MenuDivider, MenuItem, NumericInput, Spinner, Switch, Tag } from "@blueprintjs/core";
-import KeyPopover from "../ui/KeyPopover";
+import {
+  Alert,
+  Button,
+  Dialog,
+  DialogBody,
+  DialogFooter,
+  FormGroup,
+  HTMLSelect,
+  HTMLTable,
+  InputGroup,
+  Spinner,
+  Switch,
+  Tag,
+} from "@blueprintjs/core";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, fmtDateTime, getUser } from "../api";
 import NonIdealState from "../components/NonIdealState";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { api, fmtDateTime } from "../api";
-import { toastError, toastSuccess } from "../toast";
-import { PAYMENT_TERMS, PRICE_GROUPS, withCurrent, priceGroupLabel } from "../constants";
 import { plural } from "../plural";
-import { FilterGroup, FilterPopover, FilterTag, HintDetails, PageFrame, Toolbar } from "../ui";
+import { toastError, toastSuccess } from "../toast";
+import { PageFrame, Toolbar } from "../ui";
+import { useVersion } from "../useVersion";
 
-/* Benutzerverwaltung — übernommen aus der alten Admin-Subapp.
-
-   Konten mit Aufträgen werden stillgelegt, nicht gelöscht: an ihnen hängen
-   Aufträge und Zeugnisse, die auch in zwei Jahren noch auflösbar sein müssen.
-   Konten ohne Aufträge löscht das Backend wirklich; die Meldung sagt, was
-   geschehen ist. Gespeichert wird nur, was sich geändert hat — ein bloßer
-   Namenswechsel beendet keine Sitzung mehr. */
+/* Gimel Account Manager — bewusst reduziert auf lokale Zugänge mit Benutzername
+   und Passwort (kein E-Mail-Zwang, keine Kundenkonditionen, kein 2FA-Ballast). */
 
 type Role = "admin" | "staff" | "worker" | "customer";
 
-interface UserRow {
-  id: number; email: string; name: string; company: string; role: Role;
-  active: boolean; price_group: string; discount_pct: number;
-  payment_terms: string; customer_no: string;
-  created_at: string; last_login: string | null;
-  totp_enabled: boolean; locked_until: string | null; mfa_locked_until: string | null;
+interface AccountRow {
+  id: number;
+  username: string;
+  role: Role;
+  active: boolean;
+  created_at: string;
+  last_login: string | null;
+  locked: boolean;
   failed_login_count: number;
 }
 
-interface AuditRow { id: number; at: string; actor: string; action: string; detail: Record<string, unknown> }
-
-const ROLES: Array<[Role, string]> = [
-  ["admin", "Admin — alles"],
-  ["staff", "Personal — Werkstatt und Büro"],
-  ["worker", "Werker — Aufträge, Fertigung, Versand"],
-  ["customer", "Kunde — nur Bestellportal"],
+const ROLES: Array<[Exclude<Role, "customer">, string]> = [
+  ["admin", "Admin — volle Rechte & Konten"],
+  ["staff", "Personal — Büro & Fertigung"],
+  ["worker", "Werker — Fertigung & Versand"],
 ];
-const ROLE_LABEL: Record<Role, string> = { admin: "Admin", staff: "Personal", worker: "Werker", customer: "Kunde" };
-const ROLE_INTENT: Record<Role, "danger" | "primary" | "success" | "none"> = {
-  admin: "danger", staff: "primary", worker: "success", customer: "none",
-};
-const EDITABLE: Array<keyof UserRow> = ["name", "company", "role", "active", "price_group", "discount_pct", "payment_terms", "customer_no"];
 
-const isLocked = (u: UserRow) => [u.locked_until, u.mfa_locked_until]
-  .some((t) => t && new Date(t).getTime() > Date.now());
+const ROLE_LABEL: Record<Role, string> = {
+  admin: "Admin",
+  staff: "Personal",
+  worker: "Werker",
+  customer: "Kunde",
+};
+
+const ROLE_INTENT: Record<Role, "danger" | "primary" | "success" | "none"> = {
+  admin: "danger",
+  staff: "primary",
+  worker: "success",
+  customer: "none",
+};
 
 function generatePassword(): string {
-  const words = ["Hobel", "Fraese", "Platte", "Dichtung", "Werkbank", "Zange", "Feder", "Ring", "Schnitt", "Bohrer"];
+  const words = ["Hobel", "Fraese", "Platte", "Ring", "Werkbank", "Zange", "Feder", "Schnitt", "Bohrer", "Laser"];
   const pick = () => words[crypto.getRandomValues(new Uint32Array(1))[0] % words.length];
   const n = 10 + (crypto.getRandomValues(new Uint32Array(1))[0] % 90);
-  return `${pick()}-${pick()}-${pick()}-${n}`;
+  return `${pick()}-${pick()}-${n}`;
 }
 
 export default function Users() {
-  const [rows, setRows] = useState<UserRow[] | null>(null);
+  const version = useVersion();
+  const me = getUser();
+  const [rows, setRows] = useState<AccountRow[] | null>(null);
   const [failed, setFailed] = useState("");
   const [q, setQ] = useState("");
-  const [role, setRole] = useState<"" | Role>("");
-  const [state, setState] = useState<"" | "true" | "false">("");
-  const [sort, setSort] = useState<"email" | "name" | "last_login" | "created_at">("email");
-  const [edit, setEdit] = useState<Partial<UserRow> & { password?: string } | null>(null);
-  const [original, setOriginal] = useState<UserRow | null>(null);
-  const [pw, setPw] = useState<{ user: UserRow; value: string; show: boolean } | null>(null);
-  const [confirm, setConfirm] = useState<{ kind: "delete" | "mfa"; user: UserRow } | null>(null);
-  const [history, setHistory] = useState<{ user: UserRow; rows: AuditRow[] | null } | null>(null);
+  const [roleFilter, setRoleFilter] = useState<"" | Role>("");
+
+  const [createDlg, setCreateDlg] = useState<{ username: string; password: string; role: Exclude<Role, "customer">; show: boolean } | null>(null);
+  const [editDlg, setEditDlg] = useState<{ orig: AccountRow; username: string; role: Exclude<Role, "customer">; active: boolean } | null>(null);
+  const [pwDlg, setPwDlg] = useState<{ account: AccountRow; password: string; show: boolean } | null>(null);
+  const [ownPwDlg, setOwnPwDlg] = useState<{ current: string; next: string; confirm: string; show: boolean } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AccountRow | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const qs = new URLSearchParams({ q, limit: "1000" });
-    if (role) qs.set("role", role);
-    if (state) qs.set("active", state);
+    const qs = new URLSearchParams({ limit: "500" });
+    if (q.trim()) qs.set("q", q.trim());
+    if (roleFilter) qs.set("role", roleFilter);
     try {
-      setRows(await api<UserRow[]>(`/api/users?${qs.toString()}`));
+      setRows(await api<AccountRow[]>(`/api/accounts?${qs.toString()}`));
       setFailed("");
-    } catch (e: any) { setFailed(e.message); toastError(e.message); }
-  }, [q, role, state]);
-  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [load]);
+    } catch (e: any) {
+      setFailed(e.message);
+      toastError(e.message);
+    }
+  }, [q, roleFilter]);
+
+  useEffect(() => {
+    const t = setTimeout(load, 150);
+    return () => clearTimeout(t);
+  }, [load]);
 
   const sorted = useMemo(() => {
     if (!rows) return null;
-    const val = (u: UserRow) => (sort === "name" ? (u.name || u.email) : (u[sort] ?? "")) as string;
-    const desc = sort === "last_login" || sort === "created_at";
-    return [...rows].sort((a, b) => (desc ? -1 : 1) * val(a).localeCompare(val(b), "de"));
-  }, [rows, sort]);
+    return [...rows].sort((a, b) => a.username.localeCompare(b.username, "de"));
+  }, [rows]);
 
-  // Domain-Regeln erzwingt das Backend je nach Konfiguration (plugin.internal_email_domain).
-  const domainProblem = (_email: string, _r: Role | undefined) => "";
-
-  const save = async () => {
-    if (!edit) return;
+  const createAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createDlg) return;
+    const username = createDlg.username.trim();
+    if (!username || !createDlg.password) {
+      toastError("Benutzername und Passwort sind Pflicht.");
+      return;
+    }
     setBusy(true);
     try {
-      if (edit.id && original) {
-        // Nur Geändertes schicken: sonst hält das Backend Rolle und Aktiv-Schalter
-        // für eine Änderung, und das Protokoll füllt sich mit Gleichem.
-        const changes: Record<string, unknown> = {};
-        for (const k of EDITABLE) if (edit[k] !== undefined && edit[k] !== original[k]) changes[k] = edit[k];
-        if (!Object.keys(changes).length) { toastSuccess("Keine Änderung."); setEdit(null); return; }
-        const problem = domainProblem(original.email, changes.role as Role | undefined);
-        if (problem) { toastError(problem); return; }
-        if (changes.active === false && !window.confirm(`${original.email} stilllegen? Alle Sitzungen enden sofort.`)) return;
-        await api(`/api/users/${edit.id}`, { method: "PATCH", body: JSON.stringify(changes) });
-        toastSuccess(changes.role || changes.active === false
-          ? "Konto geändert — die Sitzungen des Kontos wurden beendet." : "Konto geändert.");
-      } else {
-        const email = (edit.email ?? "").trim();
-        if (!email || !edit.password) { toastError("E-Mail und Kennwort sind Pflicht."); return; }
-        const problem = domainProblem(email, edit.role);
-        if (problem) { toastError(problem); return; }
-        await api("/api/users", { method: "POST", body: JSON.stringify({ ...edit, email }) });
-        toastSuccess("Konto angelegt.");
-      }
-      setEdit(null); setOriginal(null); load();
-    } catch (e: any) { toastError(e.message); } finally { setBusy(false); }
-  };
-
-  const setPassword = async () => {
-    if (!pw) return;
-    setBusy(true);
-    try {
-      await api(`/api/users/${pw.user.id}/password`, {
-        method: "POST", body: JSON.stringify({ password: pw.value }),
+      await api("/api/accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          username,
+          password: createDlg.password,
+          role: createDlg.role,
+        }),
       });
-      toastSuccess(`Kennwort für ${pw.user.email} gesetzt — Sperren aufgehoben, Sitzungen beendet.`);
-      setPw(null); load();
-    } catch (e: any) { toastError(e.message); } finally { setBusy(false); }
-  };
-
-  const unlock = async (u: UserRow) => {
-    try {
-      await api(`/api/users/${u.id}/unlock`, { method: "POST" });
-      toastSuccess(`${u.email} entsperrt.`); load();
-    } catch (e: any) { toastError(e.message); }
-  };
-
-  const reactivate = async (u: UserRow) => {
-    try {
-      await api(`/api/users/${u.id}`, { method: "PATCH", body: JSON.stringify({ active: true }) });
-      toastSuccess(`${u.email} wieder aktiv.`); load();
-    } catch (e: any) { toastError(e.message); }
-  };
-
-  const runConfirm = async () => {
-    if (!confirm) return;
-    const { kind, user } = confirm;
-    setConfirm(null);
-    try {
-      if (kind === "mfa") {
-        await api(`/api/users/${user.id}/mfa/reset`, { method: "POST" });
-        toastSuccess(`Zweiter Faktor von ${user.email} zurückgesetzt — Anmeldung wieder nur mit Kennwort.`);
-      } else {
-        const r = await api<{ action: string; detail: string }>(`/api/users/${user.id}`, { method: "DELETE" });
-        toastSuccess(`${user.email}: ${r.detail}`);
-      }
+      toastSuccess(`Konto „${username}“ angelegt.`);
+      setCreateDlg(null);
       load();
-    } catch (e: any) { toastError(e.message); }
+    } catch (err: any) {
+      toastError(err.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const openHistory = async (u: UserRow) => {
-    setHistory({ user: u, rows: null });
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editDlg) return;
+    const changes: Record<string, unknown> = {};
+    const nextUser = editDlg.username.trim().toLowerCase();
+    if (nextUser && nextUser !== editDlg.orig.username) changes.username = nextUser;
+    if (editDlg.role !== editDlg.orig.role) changes.role = editDlg.role;
+    if (editDlg.active !== editDlg.orig.active) changes.active = editDlg.active;
+    if (!Object.keys(changes).length) {
+      setEditDlg(null);
+      return;
+    }
+    setBusy(true);
     try {
-      const data = await api<AuditRow[]>(`/api/admin/audit?entity=user&entity_id=${u.id}&limit=200`);
-      setHistory({ user: u, rows: data });
-    } catch (e: any) { toastError(e.message); setHistory(null); }
+      await api(`/api/accounts/${editDlg.orig.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(changes),
+      });
+      toastSuccess(`Konto „${nextUser || editDlg.orig.username}“ gespeichert.`);
+      setEditDlg(null);
+      load();
+    } catch (err: any) {
+      toastError(err.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const copyDetail = async (row: AuditRow) => {
+  const savePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pwDlg) return;
+    setBusy(true);
     try {
-      await navigator.clipboard.writeText(JSON.stringify(row.detail, null, 2));
-      toastSuccess("Details kopiert.");
-    } catch { toastError("Kopieren nicht möglich."); }
+      await api(`/api/accounts/${pwDlg.account.id}/password`, {
+        method: "POST",
+        body: JSON.stringify({ password: pwDlg.password }),
+      });
+      toastSuccess(`Passwort für „${pwDlg.account.username}“ geändert — bestehende Sitzungen beendet.`);
+      setPwDlg(null);
+      load();
+    } catch (err: any) {
+      toastError(err.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const newAccount = () => {
-    setOriginal(null);
-    setEdit({ role: "staff", price_group: PRICE_GROUPS[0][0], discount_pct: 0,
-              payment_terms: PAYMENT_TERMS[2][0], active: true });
+  const saveOwnPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ownPwDlg) return;
+    if (ownPwDlg.next !== ownPwDlg.confirm) {
+      toastError("Die neuen Passwörter stimmen nicht überein.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api("/api/accounts/me/password", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: ownPwDlg.current,
+          new_password: ownPwDlg.next,
+        }),
+      });
+      toastSuccess("Eigenes Passwort geändert.");
+      setOwnPwDlg(null);
+    } catch (err: any) {
+      toastError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unlockAccount = async (a: AccountRow) => {
+    try {
+      await api(`/api/accounts/${a.id}/unlock`, { method: "POST" });
+      toastSuccess(`Konto „${a.username}“ entsperrt.`);
+      load();
+    } catch (err: any) {
+      toastError(err.message);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    try {
+      const r = await api<{ action: string; detail: string }>(`/api/accounts/${target.id}`, { method: "DELETE" });
+      toastSuccess(`${target.username}: ${r.detail}`);
+      load();
+    } catch (err: any) {
+      toastError(err.message);
+    }
   };
 
   return (
-    <PageFrame title="Benutzer" sub="Konten für Personal, Werker und Kunden — Rolle, Konditionen und Sicherheit."
-               help={[{ title: "Konten und Rollen", text: <>
-                   Konten mit Aufträgen werden <b>stillgelegt, nicht gelöscht</b>: an ihnen hängen Aufträge und Zeugnisse.
-                   Konten ohne Aufträge werden gelöscht.
-                   Werker sehen nur Aufträge, Fertigung, Versand und den Grundriss — keine Preise, Kunden oder Rechnungen;
-                   ein Kundenkonto wird nie zum Werker.
-                 </> }]}>
-      <Toolbar meta={sorted && <span className="sub">{plural(sorted.length, "Konto", "Konten")}</span>}
-               end={<Button intent="primary" icon="new-person" text="Konto anlegen" onClick={newAccount} />}>
-        <InputGroup leftIcon="search" placeholder="Name, E-Mail, Firma, Kd-Nr.…" value={q} aria-label="Suchen"
-                    onChange={(e) => setQ(e.target.value)} style={{ width: 260, maxWidth: "100%" }} />
-        <HTMLSelect value={sort} onChange={(e) => setSort(e.currentTarget.value as typeof sort)} aria-label="Sortierung">
-          <option value="email">nach E-Mail</option>
-          <option value="name">nach Name</option>
-          <option value="last_login">zuletzt angemeldet</option>
-          <option value="created_at">zuletzt angelegt</option>
+    <PageFrame
+      title="Gimel Konten"
+      sub="Lokale Benutzerverwaltung — nur Benutzername und Passwort."
+      actions={
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {version?.localnetOnly !== false && (
+            <Tag minimal icon="shield" intent="success">Nur lokales Netzwerk</Tag>
+          )}
+          <Button
+            icon="key"
+            text="Eigenes Passwort"
+            onClick={() => setOwnPwDlg({ current: "", next: "", confirm: "", show: false })}
+          />
+          <Button
+            intent="primary"
+            icon="new-person"
+            text="Neues Konto"
+            onClick={() => setCreateDlg({ username: "", password: "", role: "staff", show: true })}
+          />
+        </div>
+      }
+    >
+      <Toolbar meta={sorted && <span className="sub">{plural(sorted.length, "Konto", "Konten")}</span>}>
+        <InputGroup
+          leftIcon="search"
+          placeholder="Benutzername suchen…"
+          value={q}
+          aria-label="Benutzername suchen"
+          onChange={(e) => setQ(e.target.value)}
+          style={{ width: 240, maxWidth: "100%" }}
+        />
+        <HTMLSelect
+          value={roleFilter}
+          aria-label="Rolle filtern"
+          onChange={(e) => setRoleFilter(e.currentTarget.value as "" | Role)}
+        >
+          <option value="">Alle Rollen</option>
+          {ROLES.map(([v]) => <option key={v} value={v}>{ROLE_LABEL[v]}</option>)}
         </HTMLSelect>
-        <FilterPopover active={(role ? 1 : 0) + (state ? 1 : 0)}
-                       onClear={() => { setRole(""); setState(""); }}>
-          <FilterGroup label="Rolle">
-            <HTMLSelect value={role} onChange={(e) => setRole(e.currentTarget.value as "" | Role)} aria-label="Rolle">
-              <option value="">Alle Rollen</option>
-              {ROLES.map(([v]) => <option key={v} value={v}>{ROLE_LABEL[v]}</option>)}
-            </HTMLSelect>
-          </FilterGroup>
-          <FilterGroup label="Status">
-            <HTMLSelect value={state} onChange={(e) => setState(e.currentTarget.value as "" | "true" | "false")} aria-label="Status">
-              <option value="">Aktive und stillgelegte</option>
-              <option value="true">Nur aktive</option>
-              <option value="false">Nur stillgelegte</option>
-            </HTMLSelect>
-          </FilterGroup>
-        </FilterPopover>
-        {role && <FilterTag label={ROLE_LABEL[role]} onRemove={() => setRole("")} />}
-        {state && <FilterTag label={state === "true" ? "nur aktive" : "nur stillgelegte"} onRemove={() => setState("")} />}
       </Toolbar>
 
       {failed && !rows ? (
-        <NonIdealState icon="error" title="Benutzer nicht geladen" description={failed}
-                       action={<Button icon="refresh" onClick={load}>Erneut versuchen</Button>} />
-      ) : !sorted ? <Spinner size={30} /> : sorted.length === 0 ? (
-        <NonIdealState icon="search" title="Keine Konten" description="Kein Konto passt zu Suche und Filtern." />
+        <NonIdealState
+          icon="error"
+          title="Konten nicht geladen"
+          description={failed}
+          action={<Button icon="refresh" onClick={load}>Erneut versuchen</Button>}
+        />
+      ) : !sorted ? (
+        <Spinner size={28} />
+      ) : sorted.length === 0 ? (
+        <NonIdealState
+          icon="people"
+          title="Keine Konten gefunden"
+          description="Legen Sie ein Konto mit Benutzername und Passwort an."
+          action={
+            <Button
+              intent="primary"
+              icon="new-person"
+              text="Neues Konto"
+              onClick={() => setCreateDlg({ username: "", password: "", role: "staff", show: true })}
+            />
+          }
+        />
       ) : (
         <div className="table-scroll">
-        <HTMLTable className="data-table" striped compact>
-          <thead>
-            <tr>
-              <th>Konto</th><th>Rolle</th><th>Firma</th><th>Preisgruppe</th>
-              <th className="num">Rabatt</th><th>Zahlungsziel</th><th>Zuletzt angemeldet</th><th>Sicherheit</th><th><span className="sr-only">Aktion</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((u) => (
-              <tr key={u.id} className={u.active ? undefined : "row-muted"}>
-                <td>
-                  <b>{u.name || "—"}</b>
-                  <div className="mono sub">{u.email}</div>
-                  {!u.active && <Tag minimal intent="warning">stillgelegt</Tag>}
-                </td>
-                <td><Tag minimal intent={ROLE_INTENT[u.role]}>{ROLE_LABEL[u.role]}</Tag></td>
-                <td>{u.company || "—"}{u.customer_no && <div className="mono sub">Kd-Nr. {u.customer_no}</div>}</td>
-                <td>{priceGroupLabel(u.price_group)}</td>
-                <td className="num">{u.discount_pct ? `${u.discount_pct} %` : "—"}</td>
-                <td className="sub">{u.payment_terms}</td>
-                <td className="sub">{u.last_login ? fmtDateTime(u.last_login) : "nie"}</td>
-                <td>
-                  {u.totp_enabled ? <Tag minimal intent="success" icon="shield">2FA</Tag> : <Tag minimal>ohne 2FA</Tag>}
-                  {isLocked(u) && <Tag minimal intent="danger" icon="lock" style={{ marginLeft: 4 }}>gesperrt</Tag>}
-                </td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  <KeyPopover placement="bottom-end" content={
-                    <Menu>
-                      <MenuItem icon="edit" text="Konto ändern"
-                        onClick={() => { setOriginal(u); setEdit({ ...u }); }} />
-                      <MenuItem icon="key" text="Kennwort setzen"
-                        onClick={() => setPw({ user: u, value: "", show: false })} />
-                      <MenuItem icon="history" text="Verlauf" onClick={() => openHistory(u)} />
-                      {isLocked(u) && <MenuItem icon="unlock" text="Entsperren" onClick={() => unlock(u)} />}
-                      {u.totp_enabled && <MenuItem icon="mobile-phone" text="Zweiten Faktor zurücksetzen"
-                        onClick={() => setConfirm({ kind: "mfa", user: u })} />}
-                      <MenuDivider />
-                      {u.active
-                        ? <MenuItem icon="disable" intent="danger" text="Stilllegen oder löschen"
-                            onClick={() => setConfirm({ kind: "delete", user: u })} />
-                        : <MenuItem icon="undo" text="Wieder aktivieren" onClick={() => reactivate(u)} />}
-                    </Menu>
-                  }>
-                    <Button small minimal icon="more" aria-label={`Aktionen für ${u.email}`} title="Aktionen" />
-                  </KeyPopover>
-                </td>
+          <HTMLTable className="data-table" striped compact>
+            <thead>
+              <tr>
+                <th>Benutzername</th>
+                <th>Rolle</th>
+                <th>Status</th>
+                <th>Zuletzt angemeldet</th>
+                <th style={{ width: 1 }}><span className="sr-only">Aktionen</span></th>
               </tr>
-            ))}
-          </tbody>
-        </HTMLTable>
+            </thead>
+            <tbody>
+              {sorted.map((a) => {
+                const isSelf = me?.email?.toLowerCase() === a.username.toLowerCase();
+                return (
+                  <tr key={a.id} className={a.active ? undefined : "row-muted"}>
+                    <td>
+                      <span className="mono" style={{ fontWeight: 600 }}>{a.username}</span>
+                      {isSelf && <Tag minimal style={{ marginLeft: 6 }}>Sie</Tag>}
+                    </td>
+                    <td>
+                      <Tag minimal intent={ROLE_INTENT[a.role]}>{ROLE_LABEL[a.role]}</Tag>
+                    </td>
+                    <td>
+                      {a.active
+                        ? <Tag minimal intent="success">aktiv</Tag>
+                        : <Tag minimal intent="warning">stillgelegt</Tag>}
+                      {a.locked && <Tag minimal intent="danger" icon="lock" style={{ marginLeft: 4 }}>gesperrt</Tag>}
+                    </td>
+                    <td className="sub">{a.last_login ? fmtDateTime(a.last_login) : "nie"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <div style={{ display: "inline-flex", gap: 4 }}>
+                        <Button
+                          small
+                          minimal
+                          icon="key"
+                          text="Passwort"
+                          onClick={() => setPwDlg({ account: a, password: "", show: true })}
+                        />
+                        {a.role !== "customer" && (
+                          <Button
+                            small
+                            minimal
+                            icon="edit"
+                            title="Benutzername, Rolle oder Status ändern"
+                            aria-label={`Konto ${a.username} bearbeiten`}
+                            onClick={() => setEditDlg({
+                              orig: a,
+                              username: a.username,
+                              role: a.role as Exclude<Role, "customer">,
+                              active: a.active,
+                            })}
+                          />
+                        )}
+                        {a.locked && (
+                          <Button
+                            small
+                            minimal
+                            intent="warning"
+                            icon="unlock"
+                            title="Sperre aufheben"
+                            aria-label={`Konto ${a.username} entsperren`}
+                            onClick={() => unlockAccount(a)}
+                          />
+                        )}
+                        <Button
+                          small
+                          minimal
+                          intent="danger"
+                          icon="trash"
+                          title="Löschen oder stilllegen"
+                          aria-label={`Konto ${a.username} löschen`}
+                          onClick={() => setDeleteTarget(a)}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </HTMLTable>
         </div>
       )}
 
-      <Dialog isOpen={!!edit} onClose={() => setEdit(null)} style={{ width: 540 }}
-              title={edit?.id ? `Konto ${edit.email}` : "Neues Konto"}>
-        <form onSubmit={(e) => { e.preventDefault(); save(); }}>
+      {/* Neues Konto */}
+      <Dialog
+        isOpen={!!createDlg}
+        onClose={() => setCreateDlg(null)}
+        title="Neues Konto anlegen"
+        style={{ width: 420 }}
+      >
+        <form onSubmit={createAccount}>
           <DialogBody>
-            {edit && (
-              <div className="form-grid">
-                {!edit.id && (
-                  <>
-                    <label>E-Mail
-                      <InputGroup type="email" value={edit.email ?? ""} autoFocus
-                                  intent={domainProblem(edit.email ?? "", edit.role) ? "danger" : "none"}
-                                  onChange={(e) => setEdit({ ...edit, email: e.target.value })} />
-                    </label>
-                    <label>Kennwort
-                      <InputGroup type="text" value={edit.password ?? ""} placeholder="mind. 8 Zeichen, nicht aus Name/E-Mail"
-                                  rightElement={<Button minimal icon="refresh" title="Vorschlag erzeugen" aria-label="Kennwort vorschlagen"
-                                                        onClick={() => setEdit({ ...edit, password: generatePassword() })} />}
-                                  onChange={(e) => setEdit({ ...edit, password: e.target.value })} />
-                    </label>
-                  </>
-                )}
-                {domainProblem(edit.email ?? original?.email ?? "", edit.role) && (
-                  <Callout intent="danger" style={{ gridColumn: "1 / -1" }}>
-                    {domainProblem(edit.email ?? original?.email ?? "", edit.role)}
-                  </Callout>
-                )}
-                <label>Name
-                  <InputGroup value={edit.name ?? ""} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
-                </label>
-                <label>Firma
-                  <InputGroup value={edit.company ?? ""} onChange={(e) => setEdit({ ...edit, company: e.target.value })} />
-                </label>
-                <label>Rolle
-                  <HTMLSelect fill value={edit.role ?? "staff"}
-                              onChange={(e) => setEdit({ ...edit, role: e.currentTarget.value as Role })}>
-                    {ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            {createDlg && (
+              <>
+                <FormGroup label="Benutzername" labelFor="acc-new-user" helperText="Buchstaben, Ziffern, . _ - +">
+                  <InputGroup
+                    id="acc-new-user"
+                    autoFocus
+                    placeholder="z. B. max oder schicht1"
+                    value={createDlg.username}
+                    required
+                    onChange={(e) => setCreateDlg({ ...createDlg, username: e.target.value })}
+                  />
+                </FormGroup>
+                <FormGroup label="Passwort" labelFor="acc-new-pw" helperText="Mindestens 8 Zeichen.">
+                  <InputGroup
+                    id="acc-new-pw"
+                    type={createDlg.show ? "text" : "password"}
+                    value={createDlg.password}
+                    required
+                    onChange={(e) => setCreateDlg({ ...createDlg, password: e.target.value })}
+                    rightElement={
+                      <>
+                        <Button
+                          minimal
+                          icon={createDlg.show ? "eye-off" : "eye-open"}
+                          aria-label="Passwort anzeigen"
+                          onClick={() => setCreateDlg({ ...createDlg, show: !createDlg.show })}
+                        />
+                        <Button
+                          minimal
+                          icon="refresh"
+                          title="Passwort vorschlagen"
+                          aria-label="Passwort vorschlagen"
+                          onClick={() => setCreateDlg({ ...createDlg, password: generatePassword(), show: true })}
+                        />
+                      </>
+                    }
+                  />
+                </FormGroup>
+                <FormGroup label="Rolle" labelFor="acc-new-role">
+                  <HTMLSelect
+                    id="acc-new-role"
+                    fill
+                    value={createDlg.role}
+                    onChange={(e) => setCreateDlg({ ...createDlg, role: e.currentTarget.value as Exclude<Role, "customer"> })}
+                  >
+                    {ROLES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
                   </HTMLSelect>
-                </label>
-                <label>Kundennummer
-                  <InputGroup value={edit.customer_no ?? ""} placeholder="leer = wird bei Kunden vergeben"
-                              onChange={(e) => setEdit({ ...edit, customer_no: e.target.value })} />
-                </label>
-                <label>Preisgruppe
-                  <HTMLSelect fill value={edit.price_group ?? "standard"}
-                              onChange={(e) => setEdit({ ...edit, price_group: e.currentTarget.value })}>
-                    {withCurrent(PRICE_GROUPS, edit.price_group).map(([v, l]) =>
-                      <option key={v} value={v}>{l}</option>)}
-                  </HTMLSelect>
-                </label>
-                <label>Rabatt (%)
-                  <NumericInput fill clampValueOnBlur min={0} max={100} stepSize={0.5} value={edit.discount_pct ?? 0}
-                                onValueChange={(v) => setEdit({ ...edit, discount_pct: Number.isFinite(v) ? v : 0 })} />
-                </label>
-                <label style={{ gridColumn: "1 / -1" }}>Zahlungsziel
-                  <HTMLSelect fill value={edit.payment_terms ?? "30 Tage netto"}
-                              onChange={(e) => setEdit({ ...edit, payment_terms: e.currentTarget.value })}>
-                    {withCurrent(PAYMENT_TERMS, edit.payment_terms).map(([v, l]) =>
-                      <option key={v} value={v}>{l}</option>)}
-                  </HTMLSelect>
-                </label>
-                {edit.id != null && (
-                  <Switch checked={edit.active !== false} label="Konto aktiv (aus = stilllegen, alle Sitzungen enden)"
-                          style={{ gridColumn: "1 / -1" }}
-                          onChange={(e) => setEdit({ ...edit, active: e.currentTarget.checked })} />
-                )}
-              </div>
+                </FormGroup>
+              </>
             )}
           </DialogBody>
-          <DialogFooter actions={
-            <>
-              <Button text="Abbrechen" onClick={() => setEdit(null)} />
-              <Button intent="primary" type="submit" text="Speichern" loading={busy} />
-            </>} />
+          <DialogFooter
+            actions={
+              <>
+                <Button text="Abbrechen" onClick={() => setCreateDlg(null)} />
+                <Button intent="primary" type="submit" text="Konto anlegen" loading={busy} />
+              </>
+            }
+          />
         </form>
       </Dialog>
 
-      <Dialog isOpen={!!pw} onClose={() => setPw(null)} title="Kennwort setzen" style={{ width: 460 }}>
-        <form onSubmit={(e) => { e.preventDefault(); setPassword(); }}>
+      {/* Konto bearbeiten */}
+      <Dialog
+        isOpen={!!editDlg}
+        onClose={() => setEditDlg(null)}
+        title={editDlg ? `Konto „${editDlg.orig.username}“` : ""}
+        style={{ width: 420 }}
+      >
+        <form onSubmit={saveEdit}>
           <DialogBody>
-            <p>Neues Kennwort für <b>{pw?.user.email}</b>. Sperren werden aufgehoben, offene Sitzungen beendet;
-               der Benutzer wird nicht benachrichtigt — geben Sie es auf sicherem Weg weiter.</p>
-            <InputGroup type={pw?.show ? "text" : "password"} placeholder="mind. 8 Zeichen, nicht aus Name/E-Mail"
-                        value={pw?.value ?? ""} autoFocus aria-label="Neues Kennwort"
-                        onChange={(e) => setPw(pw ? { ...pw, value: e.target.value } : null)}
-                        rightElement={<>
-                          <Button minimal icon={pw?.show ? "eye-off" : "eye-open"} aria-label="Kennwort zeigen"
-                                  onClick={() => pw && setPw({ ...pw, show: !pw.show })} />
-                          <Button minimal icon="refresh" aria-label="Kennwort vorschlagen"
-                                  onClick={() => pw && setPw({ ...pw, value: generatePassword(), show: true })} />
-                        </>} />
+            {editDlg && (
+              <>
+                <FormGroup label="Benutzername" labelFor="acc-edit-user">
+                  <InputGroup
+                    id="acc-edit-user"
+                    value={editDlg.username}
+                    required
+                    onChange={(e) => setEditDlg({ ...editDlg, username: e.target.value })}
+                  />
+                </FormGroup>
+                <FormGroup label="Rolle" labelFor="acc-edit-role">
+                  <HTMLSelect
+                    id="acc-edit-role"
+                    fill
+                    value={editDlg.role}
+                    onChange={(e) => setEditDlg({ ...editDlg, role: e.currentTarget.value as Exclude<Role, "customer"> })}
+                  >
+                    {ROLES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                  </HTMLSelect>
+                </FormGroup>
+                <Switch
+                  checked={editDlg.active}
+                  label="Konto aktiv (aus = Zugang sofort sperren)"
+                  onChange={(e) => setEditDlg({ ...editDlg, active: e.currentTarget.checked })}
+                />
+              </>
+            )}
           </DialogBody>
-          <DialogFooter actions={
-            <>
-              <Button text="Abbrechen" onClick={() => setPw(null)} />
-              <Button intent="primary" type="submit" text="Setzen" loading={busy} disabled={!pw?.value} />
-            </>} />
+          <DialogFooter
+            actions={
+              <>
+                <Button text="Abbrechen" onClick={() => setEditDlg(null)} />
+                <Button intent="primary" type="submit" text="Speichern" loading={busy} />
+              </>
+            }
+          />
         </form>
       </Dialog>
 
-      <Alert isOpen={!!confirm} onCancel={() => setConfirm(null)} onConfirm={runConfirm}
-             cancelButtonText="Abbrechen" intent="danger" icon={confirm?.kind === "mfa" ? "mobile-phone" : "disable"}
-             confirmButtonText={confirm?.kind === "mfa" ? "Zweiten Faktor zurücksetzen" : "Stilllegen bzw. löschen"}>
-        {confirm?.kind === "mfa" ? (
-          <p>Zweiten Faktor von <b>{confirm.user.email}</b> zurücksetzen? Geheimnis und Wiederherstellungscodes
-             verschwinden, alle Sitzungen enden. Nur tun, wenn die Person sich zweifelsfrei ausgewiesen hat.</p>
-        ) : confirm ? (
-          <p><b>{confirm.user.email}</b>: Hat das Konto Aufträge, wird es stillgelegt; sonst wird es gelöscht.
-             Alle Sitzungen enden.</p>
-        ) : null}
-      </Alert>
+      {/* Passwort setzen */}
+      <Dialog
+        isOpen={!!pwDlg}
+        onClose={() => setPwDlg(null)}
+        title="Passwort setzen"
+        style={{ width: 420 }}
+      >
+        <form onSubmit={savePassword}>
+          <DialogBody>
+            {pwDlg && (
+              <>
+                <p style={{ marginTop: 0 }}>
+                  Neues Passwort für <b className="mono">{pwDlg.account.username}</b>. Offene Sitzungen werden beendet.
+                </p>
+                <FormGroup label="Neues Passwort" labelFor="acc-set-pw" helperText="Mindestens 8 Zeichen.">
+                  <InputGroup
+                    id="acc-set-pw"
+                    type={pwDlg.show ? "text" : "password"}
+                    autoFocus
+                    required
+                    value={pwDlg.password}
+                    onChange={(e) => setPwDlg({ ...pwDlg, password: e.target.value })}
+                    rightElement={
+                      <>
+                        <Button
+                          minimal
+                          icon={pwDlg.show ? "eye-off" : "eye-open"}
+                          aria-label="Passwort anzeigen"
+                          onClick={() => setPwDlg({ ...pwDlg, show: !pwDlg.show })}
+                        />
+                        <Button
+                          minimal
+                          icon="refresh"
+                          title="Passwort vorschlagen"
+                          aria-label="Passwort vorschlagen"
+                          onClick={() => setPwDlg({ ...pwDlg, password: generatePassword(), show: true })}
+                        />
+                      </>
+                    }
+                  />
+                </FormGroup>
+              </>
+            )}
+          </DialogBody>
+          <DialogFooter
+            actions={
+              <>
+                <Button text="Abbrechen" onClick={() => setPwDlg(null)} />
+                <Button intent="primary" type="submit" text="Passwort setzen" loading={busy} disabled={!pwDlg?.password} />
+              </>
+            }
+          />
+        </form>
+      </Dialog>
 
-      <Drawer isOpen={!!history} onClose={() => setHistory(null)} size={520}
-              title={history ? `Verlauf ${history.user.email}` : ""}>
-        <div style={{ padding: 16, overflow: "auto" }}>
-          {!history?.rows ? <Spinner size={24} /> : history.rows.length === 0 ? (
-            <NonIdealState icon="history" title="Keine Einträge" />
-          ) : (
-            <HTMLTable compact striped style={{ width: "100%" }}>
-              <thead><tr><th>Zeit</th><th>Wer</th><th>Aktion</th></tr></thead>
-              <tbody>
-                {history.rows.map((a) => (
-                  <Fragment key={a.id}>
-                    <tr><td className="sub">{fmtDateTime(a.at)}</td><td>{a.actor}</td><td><Tag minimal>{a.action}</Tag></td></tr>
-                    {a.detail && Object.keys(a.detail).length > 0 && (
-                      <tr><td colSpan={3}>
-                        <HintDetails title="Details">
-                          <pre className="ui-json" style={{ margin: 0 }}>{JSON.stringify(a.detail, null, 2)}</pre>
-                          <Button small minimal icon="duplicate" text="Kopieren"
-                                  aria-label={`Details zu ${a.action} kopieren`} onClick={() => copyDetail(a)} />
-                        </HintDetails>
-                      </td></tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </HTMLTable>
-          )}
-        </div>
-      </Drawer>
+      {/* Eigenes Passwort ändern */}
+      <Dialog
+        isOpen={!!ownPwDlg}
+        onClose={() => setOwnPwDlg(null)}
+        title="Eigenes Passwort ändern"
+        style={{ width: 420 }}
+      >
+        <form onSubmit={saveOwnPassword}>
+          <DialogBody>
+            {ownPwDlg && (
+              <>
+                <FormGroup label="Aktuelles Passwort" labelFor="own-pw-current">
+                  <InputGroup
+                    id="own-pw-current"
+                    type="password"
+                    autoFocus
+                    required
+                    value={ownPwDlg.current}
+                    onChange={(e) => setOwnPwDlg({ ...ownPwDlg, current: e.target.value })}
+                  />
+                </FormGroup>
+                <FormGroup label="Neues Passwort" labelFor="own-pw-next" helperText="Mindestens 8 Zeichen.">
+                  <InputGroup
+                    id="own-pw-next"
+                    type={ownPwDlg.show ? "text" : "password"}
+                    required
+                    value={ownPwDlg.next}
+                    onChange={(e) => setOwnPwDlg({ ...ownPwDlg, next: e.target.value })}
+                    rightElement={
+                      <Button
+                        minimal
+                        icon={ownPwDlg.show ? "eye-off" : "eye-open"}
+                        aria-label="Passwort anzeigen"
+                        onClick={() => setOwnPwDlg({ ...ownPwDlg, show: !ownPwDlg.show })}
+                      />
+                    }
+                  />
+                </FormGroup>
+                <FormGroup label="Neues Passwort wiederholen" labelFor="own-pw-confirm">
+                  <InputGroup
+                    id="own-pw-confirm"
+                    type={ownPwDlg.show ? "text" : "password"}
+                    required
+                    value={ownPwDlg.confirm}
+                    onChange={(e) => setOwnPwDlg({ ...ownPwDlg, confirm: e.target.value })}
+                  />
+                </FormGroup>
+              </>
+            )}
+          </DialogBody>
+          <DialogFooter
+            actions={
+              <>
+                <Button text="Abbrechen" onClick={() => setOwnPwDlg(null)} />
+                <Button intent="primary" type="submit" text="Passwort ändern" loading={busy} />
+              </>
+            }
+          />
+        </form>
+      </Dialog>
+
+      {/* Konto löschen / stilllegen */}
+      <Alert
+        isOpen={!!deleteTarget}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        cancelButtonText="Abbrechen"
+        confirmButtonText="Löschen / Stilllegen"
+        intent="danger"
+        icon="trash"
+      >
+        {deleteTarget && (
+          <p>
+            Konto <b className="mono">{deleteTarget.username}</b> entfernen? Falls Aufträge an diesem Konto hängen,
+            wird es stattdessen stillgelegt; alle Sitzungen enden sofort.
+          </p>
+        )}
+      </Alert>
     </PageFrame>
   );
 }

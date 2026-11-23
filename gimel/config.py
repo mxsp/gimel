@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     #: jede IP-Adresse. Nur nötig, wenn ein Dienst die API unter einem Namen
     #: anspricht (z. B. ``ALPHA_API_URL=http://alef-api:8001``).
     allowed_hosts: str = ""
+    #: Nur lokales Netzwerk (Loopback, RFC1918, Link-Local, IPv6 ULA).
+    #: Standardmäßig aktiv — öffentliche Client-IPs und weitergeleitete
+    #: öffentliche Proxy-IPs werden mit 403 abgewiesen.
+    localnet_only: bool = True
+    #: Zusätzliche erlaubte Subnetze/IPs (Komma-getrennt, z. B. WireGuard/LAN-VPN).
+    localnet_allow: str = ""
     #: Datenschlüssel für die Feldverschlüsselung (fieldcrypt.py):
     #: ``kennung:base64url(32 Byte)``, mehrere mit Komma, der erste schreibt.
     #: Leer = Klartext wie bisher. Nie aus SECRET_KEY abgeleitet.

@@ -654,6 +654,24 @@ export async function loginOptions(): Promise<{ test: boolean; gimel: boolean }>
   return { test: data.test_pin_enabled === true, gimel: data.gimel_pin_enabled === true };
 }
 
+export async function accountSetupStatus(): Promise<{ needsSetup: boolean; localnetOnly: boolean }> {
+  const data = await api<{ needs_setup?: boolean; localnet_only?: boolean }>("/api/accounts/setup-status");
+  return { needsSetup: data.needs_setup === true, localnetOnly: data.localnet_only !== false };
+}
+
+export async function setupFirstAdmin(username: string, password: string): Promise<SessionUser> {
+  const r = await fetch("/api/accounts/setup", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: username.trim(), password }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(r.status, data.detail ?? "Einrichtung fehlgeschlagen.");
+  setToken(data.access_token);
+  return { email: data.email, name: data.name || data.email, role: data.role, adminWork: data.admin_work === true };
+}
+
 export async function logout(): Promise<void> {
   try { await api("/api/auth/logout", { method: "POST" }); } catch { /* egal */ }
   clearToken(true);

@@ -1,48 +1,57 @@
-import { Button, FormGroup, InputGroup } from "@blueprintjs/core";
+import { Button, Callout, FormGroup, InputGroup, Tag } from "@blueprintjs/core";
 import { useEffect, useState } from "react";
-import { ApiError, login, loginMfa, loginOptions, loginPin, SessionUser } from "./api";
+import { accountSetupStatus, ApiError, login, SessionUser, setupFirstAdmin } from "./api";
 import BotSmiley from "./BotSmiley";
 
 export default function Login({ onLogin, title = "Gimel Agent Lab",
-  subtitle = "Assistent für Aufträge, Fertigung und Stammdaten. Anmeldung mit Ihrem Gimel-Konto." }: {
+  subtitle = "Lokale Anmeldung mit Benutzername und Passwort." }: {
   onLogin: (user: SessionUser) => void;
   title?: string;
   subtitle?: string;
 }) {
-  const [options, setOptions] = useState({ test: false, gimel: false });
-  const [pinMode, setPinMode] = useState(false);
-  const [pin, setPin] = useState("");
-  const [email, setEmail] = useState("");
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [localnetOnly, setLocalnetOnly] = useState(true);
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [ticket, setTicket] = useState("");
-  const [code, setCode] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    loginOptions().then(setOptions).catch(() => {});
+    accountSetupStatus()
+      .then((s) => {
+        setNeedsSetup(s.needsSetup);
+        setLocalnetOnly(s.localnetOnly);
+      })
+      .catch(() => {});
   }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
-    setBusy(true);
     setError("");
+    const cleanUser = username.trim();
+    if (!cleanUser || !password) {
+      setError("Benutzername und Passwort sind erforderlich.");
+      return;
+    }
+    if (needsSetup) {
+      if (password.length < 8) {
+        setError("Das Passwort braucht mindestens 8 Zeichen.");
+        return;
+      }
+      if (password !== passwordConfirm) {
+        setError("Die Passwörter stimmen nicht überein.");
+        return;
+      }
+    }
+    setBusy(true);
     try {
-      if (ticket) {
-        onLogin(await loginMfa(ticket, code));
+      if (needsSetup) {
+        onLogin(await setupFirstAdmin(cleanUser, password));
         return;
       }
-      if (pinMode) {
-        onLogin(await loginPin(pin));
-        return;
-      }
-      const result = await login(email, password);
-      if (result.mfaToken) {
-        setTicket(result.mfaToken);
-        setPassword("");
-        return;
-      }
+      const result = await login(cleanUser, password);
       if (result.user) onLogin(result.user);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
@@ -54,47 +63,56 @@ export default function Login({ onLogin, title = "Gimel Agent Lab",
   return (
     <div className="login-stage">
       <form className="login-card" onSubmit={submit}>
-        <h1 className="login-title"><BotSmiley size={31} variant="brand" trackMouse /> {title}</h1>
-        <p className="login-sub">{subtitle}</p>
-        {ticket ? (
-          <FormGroup label="App-Code oder Wiederherstellungscode" labelFor="mfa-code">
-            <InputGroup id="mfa-code" autoFocus autoComplete="one-time-code" value={code}
-              onChange={(e) => setCode(e.target.value)} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <h1 className="login-title" style={{ margin: 0 }}><BotSmiley size={31} variant="brand" trackMouse /> {title}</h1>
+          {localnetOnly && <Tag minimal icon="shield">Localnet</Tag>}
+        </div>
+        <p className="login-sub">
+          {needsSetup ? "Ersteinrichtung — erstes Admin-Konto anlegen." : subtitle}
+        </p>
+        {needsSetup && (
+          <Callout intent="primary" icon="new-person" style={{ marginBottom: 12 }}>
+            Es existiert noch kein Konto. Legen Sie jetzt ein Admin-Konto mit Benutzername und Passwort an.
+          </Callout>
+        )}
+        <FormGroup label="Benutzername" labelFor="lab-username">
+          <InputGroup
+            id="lab-username"
+            type="text"
+            autoFocus
+            autoComplete="username"
+            placeholder={needsSetup ? "z. B. admin" : "Benutzername"}
+            value={username}
+            required
+            onChange={(e) => setUsername(e.target.value)}
+          />
+        </FormGroup>
+        <FormGroup label="Passwort" labelFor="lab-password" helperText={needsSetup ? "Mindestens 8 Zeichen." : undefined}>
+          <InputGroup
+            id="lab-password"
+            type="password"
+            autoComplete={needsSetup ? "new-password" : "current-password"}
+            value={password}
+            required
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </FormGroup>
+        {needsSetup && (
+          <FormGroup label="Passwort wiederholen" labelFor="lab-password-confirm">
+            <InputGroup
+              id="lab-password-confirm"
+              type="password"
+              autoComplete="new-password"
+              value={passwordConfirm}
+              required
+              onChange={(e) => setPasswordConfirm(e.target.value)}
+            />
           </FormGroup>
-        ) : pinMode ? (
-          <FormGroup label={options.gimel ? "Gimel-PIN" : "Test-PIN"}
-            helperText="Betriebszugang. Benutzer und Anbieter bleiben persönlichen Admin-Konten vorbehalten.">
-            <InputGroup id="pin" type="password" inputMode="numeric" autoFocus value={pin}
-              onChange={(e) => setPin(e.target.value)} />
-          </FormGroup>
-        ) : (
-          <>
-            <FormGroup label="E-Mail" labelFor="email">
-              <InputGroup id="email" type="email" autoFocus autoComplete="username" value={email}
-                onChange={(e) => setEmail(e.target.value)} />
-            </FormGroup>
-            <FormGroup label="Passwort" labelFor="password">
-              <InputGroup id="password" type="password" autoComplete="current-password" value={password}
-                onChange={(e) => setPassword(e.target.value)} />
-            </FormGroup>
-          </>
         )}
         {error && <p className="login-error" role="alert">{error}</p>}
-        <Button type="submit" intent="primary" fill loading={busy} icon="log-in">
-          {ticket ? "Code prüfen" : "Anmelden"}
+        <Button type="submit" intent="primary" fill loading={busy} icon={needsSetup ? "new-person" : "log-in"}>
+          {needsSetup ? "Admin-Konto anlegen" : "Anmelden"}
         </Button>
-        {(options.test || options.gimel) && (
-          <Button type="button" minimal fill disabled={busy}
-            onClick={() => { setPinMode(!pinMode); setPin(""); setTicket(""); setCode(""); setError(""); }}>
-            {pinMode ? "Mit E-Mail und Passwort anmelden"
-              : options.gimel ? "Mit Gimel-PIN anmelden" : "Testzugang mit PIN"}
-          </Button>
-        )}
-        {ticket && (
-          <Button type="button" minimal fill onClick={() => { setTicket(""); setCode(""); setError(""); }}>
-            Neu beginnen
-          </Button>
-        )}
       </form>
     </div>
   );

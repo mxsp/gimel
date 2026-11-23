@@ -88,6 +88,8 @@ def _configure_env_before_import(
     os.environ["GIMEL_ENV"] = "production" if mode == "production" else "development"
     # Robots disabled by default in packaged releases (opt-in via GIMEL_ENABLE_ROBOTS=1)
     os.environ.setdefault("GIMEL_ENABLE_ROBOTS", "0")
+    # Localnet-only enforcement enabled by default (disable explicitly via GIMEL_LOCALNET_ONLY=0)
+    os.environ.setdefault("GIMEL_LOCALNET_ONLY", "1")
     _ensure_key_file(data_dir, "secret.key", "GIMEL_SECRET_KEY")
     if mode == "production":
         _ensure_key_file(data_dir, "portal.token", "GIMEL_PORTAL_TOKEN")
@@ -149,19 +151,23 @@ def _prepare_production(
             )
             return 2
         user_count = db.query(User).count()
-        email = (admin_email or os.environ.get("GIMEL_ADMIN_EMAIL", "")).strip().lower()
+        username = (
+            admin_email
+            or os.environ.get("GIMEL_ADMIN_USER", "")
+            or os.environ.get("GIMEL_ADMIN_EMAIL", "")
+        ).strip().lower()
         pw = (admin_password or os.environ.get("GIMEL_ADMIN_PASSWORD", "")).strip()
-        name = (admin_name or os.environ.get("GIMEL_ADMIN_NAME", "Administrator")).strip()
-        if user_count == 0 and email and pw:
-            if len(pw) < 12:
+        name = (admin_name or os.environ.get("GIMEL_ADMIN_NAME", "") or username).strip()
+        if user_count == 0 and username and pw:
+            if len(pw) < 8:
                 print(
-                    "FEHLER: GIMEL_ADMIN_PASSWORD muss mindestens 12 Zeichen lang sein.",
+                    "FEHLER: GIMEL_ADMIN_PASSWORD muss mindestens 8 Zeichen lang sein.",
                     file=sys.stderr,
                 )
                 return 2
             db.add(
                 User(
-                    email=email,
+                    email=username,
                     name=name,
                     role=Role.admin,
                     password_hash=hash_password(pw),
@@ -169,12 +175,11 @@ def _prepare_production(
                 )
             )
             db.commit()
-            print(f"[Production] Erstes Admin-Konto angelegt: {email}")
+            print(f"[Production] Erstes Admin-Konto angelegt: {username}")
         elif user_count == 0:
             print(
-                "[Production] Noch kein Benutzerkonto vorhanden. Legen Sie eines an mit:\n"
-                "  GIMEL_ADMIN_EMAIL=admin@firma.de GIMEL_ADMIN_PASSWORD='<min-12-zeichen>' "
-                "oder `gimel adduser admin@firma.de --role admin`",
+                "[Production] Noch kein Konto vorhanden — erstes Admin-Konto direkt im Browser anlegen\n"
+                "  oder per CLI: `gimel accounts add admin --role admin`",
                 file=sys.stderr,
             )
     return 0
@@ -325,9 +330,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", default=None, help="Basisordner für playground/ und production/")
     parser.add_argument("--reset", action="store_true", help="Playground-Datenbank vor Start zurücksetzen")
     parser.add_argument("--no-browser", action="store_true", default=os.environ.get("GIMEL_NO_BROWSER") == "1")
-    parser.add_argument("--admin-email", default="")
+    parser.add_argument("--admin-user", "--admin-email", dest="admin_email", default="")
     parser.add_argument("--admin-password", default="")
-    parser.add_argument("--admin-name", default="Administrator")
+    parser.add_argument("--admin-name", default="")
 
     args = parser.parse_args(argv)
     mode: Mode = args.mode or _pick_mode_interactive()

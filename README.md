@@ -7,7 +7,9 @@ Gimel is a local-first manufacturing ERP, MES, sheet-nesting, and 3D factory twi
 - **AI Assistant (`/lab` + docked Copilot)** — Optional assistant workspace (`agentlab/`) with configurable LLM providers, tools, routines, and artifacts.
 - **Always ships with both modes:**
   - **Playground (`:8040`)** — Isolated sandbox pre-seeded with the fictional demo plant *Musterwerk GmbH* (`--reset` anytime).
-  - **Production (`:8041`)** — Clean, empty production database (SQLite or PostgreSQL), strict secret/token validation, `/docs` disabled, and optional first-run admin bootstrap.
+  - **Production (`:8041`)** — Clean, empty production database (SQLite or PostgreSQL), strict secret/token validation, `/docs` disabled, and first-run admin setup right in the browser or via CLI.
+- **Localnet-only by default (`GIMEL_LOCALNET_ONLY=1`)** — Blocks non-localnet peers and public proxy forwarding headers (`X-Forwarded-For`, `CF-Connecting-IP`, `Forwarded`) with `403`.
+- **Simple Account Manager (Username + Password)** — Manage local accounts via `/app#/benutzer`, `/api/accounts`, or `gimel accounts list|add|passwd|role|enable|disable|unlock|delete`.
 
 > **License:** Source-available for **non-commercial use only** (see [LICENSE](./LICENSE)). Commercial use requires a separate license.
 
@@ -65,7 +67,12 @@ python3 -m venv .venv
 .venv/bin/gimel playground
 
 # Or start Production (clean DB in ~/.local/share/gimel/production)
-.venv/bin/gimel production --admin-email admin@example.com --admin-password "replace-with-12-plus-chars"
+.venv/bin/gimel production --admin-user admin --admin-password "replace-with-strong-password"
+
+# Manage local accounts (username + password)
+.venv/bin/gimel accounts list
+.venv/bin/gimel accounts add max --role staff
+.venv/bin/gimel accounts passwd max
 ```
 
 ---

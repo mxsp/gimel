@@ -20,6 +20,7 @@ services:
     environment:
       GIMEL_MODE: playground
       GIMEL_PORT: "8040"
+      GIMEL_LOCALNET_ONLY: "1"
       GIMEL_ENABLE_ROBOTS: "0"
     ports:
       - "127.0.0.1:8040:8040"
@@ -57,13 +58,14 @@ services:
       GIMEL_MODE: production
       GIMEL_ENV: production
       GIMEL_PORT: "8041"
+      GIMEL_LOCALNET_ONLY: ${GIMEL_LOCALNET_ONLY:-1}
+      GIMEL_LOCALNET_ALLOW: ${GIMEL_LOCALNET_ALLOW:-}
       GIMEL_ENABLE_ROBOTS: "0"
       GIMEL_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-gimel}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-gimel}
       GIMEL_SECRET_KEY: ${GIMEL_SECRET_KEY:-}
       GIMEL_ALLOWED_HOSTS: ${GIMEL_ALLOWED_HOSTS:-127.0.0.1,localhost}
-      GIMEL_ADMIN_EMAIL: ${GIMEL_ADMIN_EMAIL:-admin@example.com}
+      GIMEL_ADMIN_USER: ${GIMEL_ADMIN_USER:-${GIMEL_ADMIN_EMAIL:-}}
       GIMEL_ADMIN_PASSWORD: ${GIMEL_ADMIN_PASSWORD:-}
-      GIMEL_ADMIN_NAME: ${GIMEL_ADMIN_NAME:-Administrator}
     ports:
       - "127.0.0.1:8041:8041"
     volumes:

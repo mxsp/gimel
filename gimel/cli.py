@@ -245,23 +245,158 @@ def _run_mode(mode: str, args: argparse.Namespace) -> int:
 
 def _adduser(args: argparse.Namespace) -> int:
     _init()
+    from fastapi import HTTPException
     from .db import SessionLocal
     from .models import Role, User
+    from .routers.accounts import normalize_username
+    from .routers.auth import check_password_strength
     from .security import hash_password
 
-    pw = args.password or getpass.getpass("Password (min. 12 characters): ")
-    if len(pw) < 12:
-        print("Too short.", file=sys.stderr)
+    try:
+        username = normalize_username(args.email)
+    except HTTPException as exc:
+        print(f"Error: {exc.detail}", file=sys.stderr)
+        return 1
+    pw = args.password or getpass.getpass("Password (min. 8 characters): ")
+    try:
+        check_password_strength(pw, email=username, name=args.name or username)
+    except HTTPException as exc:
+        print(f"Error: {exc.detail}", file=sys.stderr)
         return 1
     with SessionLocal() as db:
-        if db.query(User).filter(User.email == args.email.lower()).count():
+        if db.query(User).filter(User.email == username).count():
             print("User exists.", file=sys.stderr)
             return 1
-        db.add(User(email=args.email.lower(), name=args.name or "", role=Role(args.role),
+        db.add(User(email=username, name=args.name or username, role=Role(args.role),
                     password_hash=hash_password(pw), active=True))
         db.commit()
-    print(f"Created {args.role} {args.email}")
+    print(f"Created {args.role} {username}")
     return 0
+
+
+def _accounts_cmd(args: argparse.Namespace) -> int:
+    """CLI Account Manager: list, add, passwd, role, enable, disable, unlock, delete."""
+    _init()
+    from fastapi import HTTPException
+    from .db import SessionLocal
+    from .models import Order, Role, User
+    from .routers.accounts import normalize_username
+    from .routers.auth import check_password_strength
+    from .routers.users import assert_not_last_admin
+    from .security import hash_password
+    from .services.mfa import revoke_other_sessions
+
+    action = args.account_action
+    with SessionLocal() as db:
+        if action == "list":
+            users = db.query(User).order_by(User.email, User.id).all()
+            if not users:
+                print("No accounts yet. Create one with: gimel accounts add <username> --role admin")
+                return 0
+            print(f"{'ID':<4} {'USERNAME':<28} {'ROLE':<10} {'STATUS':<10} {'LAST LOGIN'}")
+            for u in users:
+                st = "active" if u.active else "disabled"
+                last = u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "never"
+                print(f"{u.id:<4} {u.email:<28} {u.role.value:<10} {st:<10} {last}")
+            return 0
+
+        try:
+            username = normalize_username(args.username)
+        except HTTPException as exc:
+            print(f"Error: {exc.detail}", file=sys.stderr)
+            return 1
+
+        if action == "add":
+            pw = args.password or getpass.getpass(f"Password for {username} (min. 8 chars): ")
+            try:
+                check_password_strength(pw, email=username, name=username)
+            except HTTPException as exc:
+                print(f"Error: {exc.detail}", file=sys.stderr)
+                return 1
+            if db.query(User).filter(User.email == username).first():
+                print(f"Error: account '{username}' already exists.", file=sys.stderr)
+                return 1
+            db.add(User(email=username, name=username, role=Role(args.role),
+                        password_hash=hash_password(pw), active=True))
+            db.commit()
+            print(f"Created account '{username}' (role={args.role})")
+            return 0
+
+        user = db.query(User).filter(User.email == username).first()
+        if not user:
+            print(f"Error: account '{username}' not found.", file=sys.stderr)
+            return 1
+
+        if action == "passwd":
+            pw = args.password or getpass.getpass(f"New password for {username} (min. 8 chars): ")
+            try:
+                check_password_strength(pw, email=user.email, name=user.name)
+            except HTTPException as exc:
+                print(f"Error: {exc.detail}", file=sys.stderr)
+                return 1
+            user.password_hash = hash_password(pw)
+            user.failed_login_count = 0
+            user.locked_until = None
+            revoke_other_sessions(db, user, keep_id=None)
+            db.commit()
+            print(f"Password updated for '{username}' (sessions revoked).")
+            return 0
+
+        if action == "role":
+            new_role = Role(args.role)
+            if user.role == Role.admin and new_role != Role.admin:
+                try:
+                    assert_not_last_admin(db, user)
+                except HTTPException as exc:
+                    print(f"Error: {exc.detail}", file=sys.stderr)
+                    return 1
+            user.role = new_role
+            revoke_other_sessions(db, user, keep_id=None)
+            db.commit()
+            print(f"Role updated for '{username}' -> {new_role.value}")
+            return 0
+
+        if action in ("enable", "disable"):
+            active_val = action == "enable"
+            if not active_val:
+                try:
+                    assert_not_last_admin(db, user)
+                except HTTPException as exc:
+                    print(f"Error: {exc.detail}", file=sys.stderr)
+                    return 1
+                revoke_other_sessions(db, user, keep_id=None)
+            user.active = active_val
+            db.commit()
+            print(f"Account '{username}' {'enabled' if active_val else 'disabled'}.")
+            return 0
+
+        if action == "unlock":
+            user.failed_login_count = 0
+            user.locked_until = None
+            user.mfa_failed_count = 0
+            user.mfa_locked_until = None
+            db.commit()
+            print(f"Account '{username}' unlocked.")
+            return 0
+
+        if action == "delete":
+            try:
+                assert_not_last_admin(db, user)
+            except HTTPException as exc:
+                print(f"Error: {exc.detail}", file=sys.stderr)
+                return 1
+            revoke_other_sessions(db, user, keep_id=None)
+            has_orders = db.query(Order.id).filter(Order.user_id == user.id).first() is not None
+            if has_orders:
+                user.active = False
+                db.commit()
+                print(f"Account '{username}' disabled (linked orders preserved).")
+            else:
+                db.delete(user)
+                db.commit()
+                print(f"Account '{username}' deleted.")
+            return 0
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -296,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     pr = sub.add_parser("production", help="run clean Production server (empty DB / PostgreSQL, port 8041)")
     pr.add_argument("--host", default=HOST)
     pr.add_argument("--port", type=int, default=8041)
-    pr.add_argument("--admin-email", default="")
+    pr.add_argument("--admin-user", "--admin-email", dest="admin_email", default="")
     pr.add_argument("--admin-password", default="")
     pr.add_argument("--no-browser", action="store_true")
     pr.set_defaults(fn=lambda a: _run_mode("production", a))
@@ -317,12 +452,35 @@ def main(argv: list[str] | None = None) -> int:
     h = sub.add_parser("hall3", help="add 'Hall 3 Experimental' next to Halle 2 (one floor, one door, 7-axis arm)")
     h.set_defaults(fn=_hall3)
 
-    u = sub.add_parser("adduser", help="create a user")
-    u.add_argument("email")
+    u = sub.add_parser("adduser", help="create a user (username + password)")
+    u.add_argument("email", metavar="username", help="username (or email)")
     u.add_argument("--name", default="")
-    u.add_argument("--password", default="", help="default: ask")
+    u.add_argument("--password", default="", help="default: prompt")
     u.add_argument("--role", choices=["admin", "staff", "worker"], default="staff")
     u.set_defaults(fn=_adduser)
+
+    acc = sub.add_parser("accounts", aliases=["account"],
+                         help="manage Gimel local accounts (username + password)")
+    acc_sub = acc.add_subparsers(dest="account_action", required=True)
+    acc_sub.add_parser("list", help="list all accounts").set_defaults(fn=_accounts_cmd)
+    a_add = acc_sub.add_parser("add", help="create a new account")
+    a_add.add_argument("username")
+    a_add.add_argument("--password", default="", help="default: prompt")
+    a_add.add_argument("--role", choices=["admin", "staff", "worker"], default="staff")
+    a_add.set_defaults(fn=_accounts_cmd)
+    a_pw = acc_sub.add_parser("passwd", help="change account password")
+    a_pw.add_argument("username")
+    a_pw.add_argument("--password", default="", help="default: prompt")
+    a_pw.set_defaults(fn=_accounts_cmd)
+    a_role = acc_sub.add_parser("role", help="change account role")
+    a_role.add_argument("username")
+    a_role.add_argument("role", choices=["admin", "staff", "worker"])
+    a_role.set_defaults(fn=_accounts_cmd)
+    for act, desc in (("enable", "enable account"), ("disable", "disable account"),
+                      ("unlock", "unlock account"), ("delete", "delete (or disable) account")):
+        ap = acc_sub.add_parser(act, help=desc)
+        ap.add_argument("username")
+        ap.set_defaults(fn=_accounts_cmd)
 
     args = p.parse_args(argv)
     return int(args.fn(args) or 0)

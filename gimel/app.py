@@ -27,9 +27,11 @@ from .agent_bridge import load as _agent_bridge
 from .db import get_db
 from .extensions import active
 from .hostguard import HostGuardMiddleware
+from .localnet import LocalnetGuardMiddleware
 from . import vision_api
 from .routers import (
     account,
+    accounts,
     admin,
     auth,
     compliance,
@@ -202,6 +204,12 @@ def create_app() -> FastAPI:
     # Außen um CORS: ein fremder Host-Name (DNS-Rebinding) kommt nicht bis zu einer Route.
     app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(HostGuardMiddleware, allowed_hosts=settings.allowed_hosts)
+    # Äußerste Schicht: im Localnet-Modus bleiben öffentliche IPs und öffentliche Proxy-Header draußen.
+    app.add_middleware(
+        LocalnetGuardMiddleware,
+        enabled=settings.localnet_only,
+        allow=settings.localnet_allow,
+    )
 
 
     @app.exception_handler(Exception)
@@ -263,7 +271,7 @@ def create_app() -> FastAPI:
 
 
     for r in (
-            auth.router, account.router, users.router, products.router, rates.router,
+            auth.router, account.router, accounts.router, users.router, products.router, rates.router,
             quotes.router, production.router, production.public_router, nesting.router, punchout.router, admin.router,
             shipping.router, links.router, inventory.router, integration.router, customers.router,
             desk.router, invoicing.router, factory.router,
@@ -331,6 +339,7 @@ def create_app() -> FastAPI:
             "agent": agent_router is not None,
             "vision": not plugin or "vision" in plugin.features,
             "robots": os.environ.get("GIMEL_ENABLE_ROBOTS") == "1",
+            "localnet_only": settings.localnet_only,
             "mode": mode,
             # Das Musterwerk gibt es nur ohne Anwendung; Alef fragt die DB hier nicht.
             "demo": is_demo,
