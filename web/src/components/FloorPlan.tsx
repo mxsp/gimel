@@ -12,6 +12,7 @@ import {
   Station,
   TYPE_LABEL,
   Zone,
+  buildCirclePolygon,
   carveWallIndentation,
   circleDimensions,
   doorDirection,
@@ -26,6 +27,7 @@ import {
   outlineWithHolesPath,
   polygonArea,
   polygonCentroid,
+  polygonSelfIntersects,
   routePoints,
   sceneBounds,
   snapDoorToWall,
@@ -90,6 +92,7 @@ type Drag =
   | { kind: "draft-body"; start: [number, number]; base: [number, number][] }
   | { kind: "draft-indent"; edgeIdx: number; base: [number, number][] }
   | { kind: "draft-edge"; edgeIdx: number; base: [number, number][] }
+  | { kind: "draft-circle-radius"; cx: number; cy: number; segments: number }
   | { kind: "node"; idx: number }
   | { kind: "door"; idx: number };
 
@@ -137,6 +140,8 @@ export interface FloorPlanProps {
   /** Punkt auf einer Kante einfügen — Doppelklick auf die Kante. */
   onDraftInsert?: (afterIdx: number, p: [number, number]) => void;
   onDraftFinish?: () => void;
+  /** Schließt den offenen Linienzug (Klick auf Startpunkt P1), bleibt aber im Bearbeitungsmodus! */
+  onDraftCloseLoop?: () => void;
   /** Neu zeichnen starten (leert aktuellen Entwurf und öffnet Punkteingabe). */
   onDraftStartNew?: () => void;
   /** Geschlossenen Entwurf wieder öffnen, um weitere Punkte / Einbuchtungen anzuhängen. */
@@ -228,6 +233,7 @@ export default function FloorPlan({
   onDraftDelete,
   onDraftInsert,
   onDraftFinish,
+  onDraftCloseLoop,
   onDraftStartNew,
   onDraftReopen,
   rectMode = false,
@@ -484,7 +490,7 @@ export default function FloorPlan({
     }
     if (d.kind === "draft-indent") {
       const carved = carveWallIndentation(d.base, d.edgeIdx, [mx, my], snapM);
-      if (carved) {
+      if (carved && !polygonSelfIntersects(carved.points)) {
         onDraftReplace?.(carved.points);
         setTip({
           x: snap(mx),
@@ -496,11 +502,25 @@ export default function FloorPlan({
     }
     if (d.kind === "draft-edge") {
       const moved = moveWallSegmentOrthogonal(d.base, d.edgeIdx, [mx, my], snapM);
-      onDraftReplace?.(moved);
+      if (!polygonSelfIntersects(moved)) {
+        onDraftReplace?.(moved);
+      }
       setTip({
         x: snap(mx),
         y: snap(my) - 0.5,
         text: `Wand verschieben (${fmtNum(snap(mx))} · ${fmtNum(snap(my))} m)`,
+      });
+      return;
+    }
+    if (d.kind === "draft-circle-radius") {
+      const dist = Math.hypot(mx - d.cx, my - d.cy);
+      const diam = Math.max(snapM, snap(dist * 2));
+      const nextPts = buildCirclePolygon(d.cx, d.cy, diam, d.segments);
+      onDraftReplace?.(nextPts);
+      setTip({
+        x: d.cx,
+        y: d.cy - diam / 2 - 0.35,
+        text: `Ø ${fmtNum(diam)} m`,
       });
       return;
     }
@@ -799,10 +819,13 @@ export default function FloorPlan({
       return;
     }
     if (!onDraftPoint || draftClosed) return;
-    // Magnet: nah am Startpunkt → Polygon gilt als geschlossen.
+    // Magnet: nah am Startpunkt → Polygon schließen und im Bearbeitungsmodus bleiben!
     if (draft && draft.length >= 3) {
       const p0 = draft[0];
-      if (Math.hypot(mx - p0[0], my - p0[1]) < 15 * metersPerPx()) { onDraftFinish?.(); return; }
+      if (Math.hypot(mx - p0[0], my - p0[1]) < 15 * metersPerPx()) {
+        if (onDraftCloseLoop) onDraftCloseLoop(); else onDraftFinish?.();
+        return;
+      }
     }
     // Keinen doppelten Punkt exakt auf den letzten Punkt setzen.
     if (draft && draft.length >= 1) {
@@ -869,7 +892,10 @@ export default function FloorPlan({
   }, [view, gridM, vis.grid, metersPerPx]);
 
   const shown = stations.filter((s) => (hideInactive ? s.active : true));
-  const outline = floor.outline?.length ? floor.outline : [];
+  const outline =
+    layer === "outline"
+      ? (draftClosed && (draft?.length ?? 0) >= 3 ? draft! : [])
+      : (floor.outline?.length ? floor.outline : []);
   const floorHolePolys = useMemo(
     () => (floor.obstacles ?? [])
       .filter((o, idx) => idx !== editingObstacleIdx && isFloorHoleObstacle(o) && (o.points?.length ?? 0) >= 3)
@@ -913,11 +939,17 @@ export default function FloorPlan({
     polygonMode && draft && draft.length >= 3 && cursor &&
     cursor[0] === draft[0][0] && cursor[1] === draft[0][1];
 
+  const draftCircle = useMemo(
+    () => (polygonMode && draftClosed && draft ? circleDimensions(draft) : null),
+    [polygonMode, draftClosed, draft],
+  );
+
   const hint =
     measureMode ? "Messen: zwei Klicks setzen Anfang und Ende. Das Maß bleibt stehen, bis du neu misst."
     : rectMode ? "Rechteck: aufziehen (Klicken & Ziehen) oder zwei Ecken anklicken · Mausrad zoomt · Leertaste+Ziehen verschiebt."
     : aisleMode ? "Gang: Klick auf oder nahe einer Maschine setzt den Knoten auf ihre Mitte · Klick auf Knoten hängt an · 90°-Rast aktiv · Rechtsklick teilt/löscht."
     : doorMode ? "Zugang: Klick rastet an der nächsten Wand ein (Alt = frei) · Ziehen verschiebt ihn."
+    : draftCircle ? "Bohrung / Rundkörper: Innenfläche ziehen verschiebt · 4 Randgriffe ziehen ändert Durchmesser Ø · Enter legt an."
     : polygonMode && draftClosed && indentMode ? "Einbuchtung aktiv: Klick oder Ziehen auf einer Wand stanzt sofort eine 90°-Einbuchtung · Wandkante ziehen passt Tiefe an."
     : polygonMode && draftClosed ? "Ecken ziehen · Wandkante ziehen verschiebt Wand · [⊔]-Griff auf Wand zieht 90°-Einbuchtung · (+)-Griff teilt Wand · Enter übernimmt."
     : polygonMode ? "Offener Linienzug: Klick setzt nächste Wand-Ecke (90°-Rast aktiv, Umschalt = frei) · Einbuchtungen frei nach innen zeichnen · Klick auf Startpunkt (grün) oder Enter schließt."
@@ -936,7 +968,7 @@ export default function FloorPlan({
       <div className="floor-toolbar">
         <span className="floor-hint">{hint}</span>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          {(polygonMode || aisleMode) && (
+          {((polygonMode && !draftCircle) || aisleMode) && (
             <Button
               small
               minimal={!orthoLock}
@@ -947,7 +979,7 @@ export default function FloorPlan({
               onClick={() => setOrthoLock((v) => !v)}
             />
           )}
-          {polygonMode && draftClosed && (draft?.length ?? 0) >= 3 && onDraftReplace && (
+          {polygonMode && draftClosed && !draftCircle && (draft?.length ?? 0) >= 3 && onDraftReplace && (
             <Button
               small
               minimal={!indentMode}
@@ -958,7 +990,7 @@ export default function FloorPlan({
               onClick={() => setIndentMode((v) => !v)}
             />
           )}
-          {polygonMode && draftClosed && (draft?.length ?? 0) >= 3 && onDraftReopen && (
+          {polygonMode && draftClosed && !draftCircle && (draft?.length ?? 0) >= 3 && onDraftReopen && (
             <Button
               small
               icon="edit"
@@ -967,7 +999,7 @@ export default function FloorPlan({
               onClick={() => { setIndentMode(false); onDraftReopen(); }}
             />
           )}
-          {polygonMode && draftClosed && onDraftStartNew && (
+          {polygonMode && draftClosed && !draftCircle && onDraftStartNew && (
             <Button
               small
               icon="polygon-filter"
@@ -985,14 +1017,17 @@ export default function FloorPlan({
               onClick={() => onDraftDelete((draft?.length ?? 1) - 1)}
             />
           )}
-          {polygonMode && (draft?.length ?? 0) >= 3 && onDraftFinish && (
+          {polygonMode && (draft?.length ?? 0) >= 3 && (onDraftCloseLoop || onDraftFinish) && (
             <Button
               small
               intent="primary"
               icon="tick"
-              text={draftClosed ? "Übernehmen (Enter)" : "Schließen & Übernehmen (Enter)"}
-              title="Gezeichneten Umriss schließen und übernehmen"
-              onClick={onDraftFinish}
+              text={draftClosed ? (layer === "outline" ? "Fertig (Enter)" : "Anlegen (Enter)") : "Umriss schließen (Enter)"}
+              title={draftClosed ? "Bearbeitung abschließen" : "Gezeichneten Umriss schließen und Griffe zur Feinjustierung anzeigen"}
+              onClick={() => {
+                if (!draftClosed && onDraftCloseLoop) onDraftCloseLoop();
+                else onDraftFinish?.();
+              }}
             />
           )}
           <ButtonGroup minimal>
@@ -1065,10 +1100,11 @@ export default function FloorPlan({
             )
           ))}
 
-          {/* Hindernisse — schraffiert oder je Bauteil-Art (Wand, Raumbox, Stütze, Zaun). */}
+          {/* Hindernisse — schraffiert oder je Bauteil-Art (Wand, Raumbox, Stütze, Zaun, Bohrung). */}
           {vis.obstacles && (floor.obstacles ?? []).map((o, i) => (
             i === editingObstacleIdx ? null : (
               <ObstacleShape key={`o${i}`} obstacle={o} labels={vis.labels} size={labelSize(0.34, 10.5, 12)}
+                halo={fs(2.5)}
                 onPick={movable && !drawing && onObstacleClick ? () => onObstacleClick(i) : undefined} />
             )
           ))}
@@ -1327,9 +1363,74 @@ export default function FloorPlan({
             // Nur geschlossene Zonen/Hindernisse lassen sich über die Innenfläche verschieben —
             // beim Hallenumriss oder während des offenen Zeichnens (!draftClosed) bleibt das Innere frei für Klicks!
             const canDragBody = draftClosed && draft.length >= 3 && !!onDraftReplace && layer !== "outline" && !indentMode;
+            // Auch Fluchtlinien zu Startpunkt P1 prüfen (damit sich die letzte Ecke sauber auf P1 ausrichten lässt)!
+            const alignTolM = 9 * metersPerPx();
             const alignLines = !draftClosed && cursor
-              ? draft.filter((pt) => Math.abs(pt[0] - cursor[0]) < 1e-6 || Math.abs(pt[1] - cursor[1]) < 1e-6)
+              ? draft.filter((pt, idx) =>
+                  idx !== draft.length - 1 &&
+                  (Math.abs(pt[0] - cursor[0]) < Math.max(0.05, alignTolM * 0.6) ||
+                   Math.abs(pt[1] - cursor[1]) < Math.max(0.05, alignTolM * 0.6)))
               : [];
+
+            // Spezial-Darstellung für kreisförmige Bohrungen / Rundstützen (keine 24 Eckquadrate!)
+            if (draftCircle) {
+              const r = draftCircle.diameter / 2;
+              const chR = Math.max(0.25, r * 0.35);
+              const cardinals: [number, number][] = [
+                [draftCircle.cx + r, draftCircle.cy],
+                [draftCircle.cx - r, draftCircle.cy],
+                [draftCircle.cx, draftCircle.cy + r],
+                [draftCircle.cx, draftCircle.cy - r],
+              ];
+              return (
+                <>
+                  <path d={outlinePath(draft)} fill="var(--g-floor-outside)" fillOpacity={0.85} stroke="var(--gimel-accent)"
+                    strokeWidth={2.4} strokeDasharray="6 3" vectorEffect="non-scaling-stroke"
+                    className="floor-draft-body"
+                    pointerEvents="all"
+                    style={{ cursor: "move" }}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0 || dragRef.current || spaceDownRef.current || !onDraftReplace) return;
+                      const [mx, my] = toMeter(e.clientX, e.clientY);
+                      beginDrag(e, { kind: "draft-body", start: [mx, my], base: draft.map((q) => [q[0], q[1]] as [number, number]) });
+                    }}
+                    onClick={(e) => { e.stopPropagation(); }} />
+                  <g pointerEvents="none" opacity={0.75}>
+                    <line x1={draftCircle.cx - chR} y1={draftCircle.cy} x2={draftCircle.cx + chR} y2={draftCircle.cy}
+                      stroke="var(--gimel-accent)" strokeWidth={1.4} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />
+                    <line x1={draftCircle.cx} y1={draftCircle.cy - chR} x2={draftCircle.cx} y2={draftCircle.cy + chR}
+                      stroke="var(--gimel-accent)" strokeWidth={1.4} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />
+                  </g>
+                  {vis.labels && (
+                    <text className="floor-measure" x={draftCircle.cx} y={draftCircle.cy - r - fs(10)} textAnchor="middle"
+                      fontSize={fs(12.5)} style={{ strokeWidth: fs(2.5) }} pointerEvents="none">
+                      {`Bohrung Ø ${fmtNum(draftCircle.diameter)} m`}
+                    </text>
+                  )}
+                  {cardinals.map(([hx, hy], idx) => (
+                    <g key={`c-rim-${idx}`} className="floor-draft-hit"
+                       style={{ cursor: idx < 2 ? "ew-resize" : "ns-resize" }}
+                       onPointerDown={(e) => {
+                         if (e.button !== 0 || dragRef.current || !onDraftReplace) return;
+                         e.stopPropagation();
+                         beginDrag(e, {
+                           kind: "draft-circle-radius",
+                           cx: draftCircle.cx,
+                           cy: draftCircle.cy,
+                           segments: Math.max(24, draft.length),
+                         });
+                       }}
+                       onClick={(e) => { e.stopPropagation(); }}>
+                      <title>Ziehen, um Bohrungs-Durchmesser Ø zu ändern</title>
+                      <circle cx={hx} cy={hy} r={hitHalf * 0.8} fill="transparent" />
+                      <circle cx={hx} cy={hy} r={visHalf} fill="var(--gimel-accent)" stroke="var(--g-surface)" strokeWidth={visHalf * 0.35} pointerEvents="none" />
+                    </g>
+                  ))}
+                </>
+              );
+            }
+
+            const polyCenter = draft.length >= 3 ? polygonCentroid(draft) : [0, 0] as [number, number];
             return (
             <>
               {draftClosed ? (
@@ -1349,7 +1450,7 @@ export default function FloorPlan({
                 <>
                   {/* Vorschau-Füllung nur zeigen, wenn der Zeiger magnetisch auf dem Startpunkt (1) zum Schließen einrastet */}
                   {magnet && draft.length >= 3 && (
-                    <path d={outlinePath(draft)} fill="var(--g-floor-snap)" fillOpacity={0.12} stroke="none" pointerEvents="none" />
+                    <path d={outlinePath(draft)} fill="#22c55e" fillOpacity={0.14} stroke="none" pointerEvents="none" />
                   )}
                   <path d={openOutlinePath(draft)} fill="none" stroke={draftColour}
                     strokeWidth={2.5} vectorEffect="non-scaling-stroke"
@@ -1359,18 +1460,30 @@ export default function FloorPlan({
               {/* Flucht-Hilfslinien beim offenen Zeichnen */}
               {!draftClosed && cursor && alignLines.map((pt, idx) => (
                 <line key={`al-${idx}`} x1={pt[0]} y1={pt[1]} x2={cursor[0]} y2={cursor[1]}
-                  stroke="#38bdf8" strokeWidth={1.2} strokeDasharray="3 3"
+                  stroke="#38bdf8" strokeWidth={1.3} strokeDasharray="4 3"
                   vectorEffect="non-scaling-stroke" pointerEvents="none" />
               ))}
-              {/* Kantenmaße — beim offenen Zeichnen (!draftClosed) NIEMALS eine Kante vom letzten zum ersten Punkt bemaßen! */}
+              {/* Kantenmaße — beim offenen Zeichnen (!draftClosed) NIEMALS eine Kante vom letzten zum ersten Punkt bemaßen,
+                  und immer leicht nach außen versetzt, damit sie niemals die (+) und [⊔]-Griffe verdecken! */}
               {vis.labels && draft.map((p, i) => {
                 if (!draftClosed && i === draft.length - 1) return null;
                 const q = draft[(i + 1) % draft.length];
-                const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+                const vx = q[0] - p[0];
+                const vy = q[1] - p[1];
+                const len = Math.hypot(vx, vy);
                 if (len < 0.2) return null;
+                const mx = (p[0] + q[0]) / 2;
+                const my = (p[1] + q[1]) / 2;
+                let nx = -vy / len;
+                let ny = vx / len;
+                if (draft.length >= 3 && (mx - polyCenter[0]) * nx + (my - polyCenter[1]) * ny < 0) {
+                  nx = -nx;
+                  ny = -ny;
+                }
+                const labelOff = fs(15);
                 return (
-                  <text key={`m${i}`} className="floor-measure" textAnchor="middle"
-                    x={(p[0] + q[0]) / 2} y={(p[1] + q[1]) / 2 - fs(8)}
+                  <text key={`m${i}`} className="floor-measure" textAnchor="middle" dominantBaseline="central"
+                    x={mx + nx * labelOff} y={my + ny * labelOff}
                     fontSize={fs(11.5)} style={{ strokeWidth: fs(2.4) }}
                     pointerEvents="none">{fmtNum(len)} m</text>
                 );
@@ -1400,7 +1513,7 @@ export default function FloorPlan({
                     <line
                       className="floor-draft-hit"
                       x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]}
-                      stroke="transparent" strokeWidth={14} vectorEffect="non-scaling-stroke"
+                      stroke="transparent" strokeWidth={18} vectorEffect="non-scaling-stroke"
                       style={{ cursor: indentMode ? "crosshair" : draftClosed ? "grab" : "copy" }}
                       onPointerDown={(e) => {
                         if (!draftClosed || !onDraftReplace || e.button !== 0 || dragRef.current || spaceDownRef.current) return;
@@ -1409,7 +1522,7 @@ export default function FloorPlan({
                         if (indentMode || e.shiftKey) {
                           const [cx, cy] = toMeter(e.clientX, e.clientY);
                           const carved = carveWallIndentation(base, i, [cx, cy], snapM);
-                          if (carved) onDraftReplace(carved.points);
+                          if (carved && !polygonSelfIntersects(carved.points)) onDraftReplace(carved.points);
                           beginDrag(e, { kind: "draft-indent", edgeIdx: i, base });
                         } else {
                           beginDrag(e, { kind: "draft-edge", edgeIdx: i, base });
@@ -1450,7 +1563,7 @@ export default function FloorPlan({
                            const base = draft.map((pt) => [pt[0], pt[1]] as [number, number]);
                            const [cx, cy] = toMeter(e.clientX, e.clientY);
                            const carved = carveWallIndentation(base, i, [cx, cy], snapM);
-                           if (carved) onDraftReplace(carved.points);
+                           if (carved && !polygonSelfIntersects(carved.points)) onDraftReplace(carved.points);
                            beginDrag(e, { kind: "draft-indent", edgeIdx: i, base });
                          }}
                          onClick={(e) => { e.stopPropagation(); }}>
@@ -1475,12 +1588,12 @@ export default function FloorPlan({
               {!draftClosed && cursor && lastDraft && (
                 <g pointerEvents="none">
                   <line x1={lastDraft[0]} y1={lastDraft[1]} x2={cursor[0]} y2={cursor[1]}
-                    stroke={magnet ? "var(--g-floor-snap)" : draftColour} strokeWidth={2.2} strokeDasharray="5 3"
+                    stroke={magnet ? "#22c55e" : draftColour} strokeWidth={2.2} strokeDasharray="5 3"
                     vectorEffect="non-scaling-stroke" />
                   <text className="floor-measure" textAnchor="middle"
                     x={(lastDraft[0] + cursor[0]) / 2} y={(lastDraft[1] + cursor[1]) / 2 - fs(10)}
                     fontSize={fs(12)} style={{ strokeWidth: fs(2.5) }}>
-                    {magnet ? "● Klick auf Startpunkt (1) schließt Umriss"
+                    {magnet ? "● Klick auf Startpunkt (grün) schließt Umriss"
                       : `${fmtNum(Math.hypot(cursor[0] - lastDraft[0], cursor[1] - lastDraft[1]))} m · `
                         + `${Math.round(((Math.atan2(cursor[1] - lastDraft[1], cursor[0] - lastDraft[0]) * 180) / Math.PI + 360) % 360)}°`}
                   </text>
@@ -1488,7 +1601,7 @@ export default function FloorPlan({
               )}
               {!draftClosed && magnet && (
                 <circle cx={draft[0][0]} cy={draft[0][1]} r={fs(14)} fill="none"
-                  stroke="var(--g-floor-snap)" strokeWidth={2.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+                  stroke="#22c55e" strokeWidth={2.5} vectorEffect="non-scaling-stroke" pointerEvents="none" />
               )}
               {draft.length >= 3 && vis.labels && (() => {
                 const c = polygonCentroid(draft);
@@ -1503,13 +1616,13 @@ export default function FloorPlan({
                 <g key={i}>
                   <rect className="floor-draft-hit"
                     x={p[0] - hitHalf} y={p[1] - hitHalf} width={hitHalf * 2} height={hitHalf * 2} fill="transparent"
-                    style={{ cursor: "move" }}
+                    style={{ cursor: !draftClosed && i === 0 && draft.length >= 3 ? "pointer" : "move" }}
                     onPointerDown={(e) => {
                       if (e.button !== 0 || dragRef.current) return;
-                      // Bei Klick auf den Startpunkt während des offenen Zeichnens: Polygon schließen!
+                      // Bei Klick auf den Startpunkt während des offenen Zeichnens: Polygon schließen, aber im Editor bleiben!
                       if (!draftClosed && i === 0 && draft.length >= 3) {
                         e.stopPropagation();
-                        onDraftFinish?.();
+                        if (onDraftCloseLoop) onDraftCloseLoop(); else onDraftFinish?.();
                         return;
                       }
                       const [mx, my] = toMeter(e.clientX, e.clientY);
@@ -1525,7 +1638,7 @@ export default function FloorPlan({
                     onClick={(e) => {
                       e.stopPropagation();
                       if (!draftClosed && i === 0 && draft.length >= 3) {
-                        onDraftFinish?.();
+                        if (onDraftCloseLoop) onDraftCloseLoop(); else onDraftFinish?.();
                         return;
                       }
                       if (e.altKey) onDraftDelete?.(i);
@@ -1533,7 +1646,7 @@ export default function FloorPlan({
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onDraftDelete?.(i); }} />
                   <rect x={p[0] - visHalf} y={p[1] - visHalf} width={visHalf * 2} height={visHalf * 2}
                     rx={visHalf * 0.25}
-                    fill={i === 0 ? "var(--g-floor-snap)" : draftColour} stroke="var(--g-surface)" strokeWidth={visHalf * 0.32}
+                    fill={i === 0 ? "#22c55e" : draftColour} stroke="var(--g-surface)" strokeWidth={visHalf * 0.32}
                     pointerEvents="none" />
                 </g>
               ))}
@@ -1876,8 +1989,8 @@ function ZoneShape({ zone, labels, nameSize, subSize, quiet, halo, onPick }: {
   );
 }
 
-function ObstacleShape({ obstacle, labels, size, onPick }: {
-  obstacle: Obstacle; labels: boolean; size: number | null; onPick?: () => void;
+function ObstacleShape({ obstacle, labels, size, halo, onPick }: {
+  obstacle: Obstacle; labels: boolean; size: number | null; halo?: number; onPick?: () => void;
 }) {
   if ((obstacle.points?.length ?? 0) < 3) return null;
   const c = polygonCentroid(obstacle.points);
@@ -1931,6 +2044,7 @@ function ObstacleShape({ obstacle, labels, size, onPick }: {
       {labels && labelText && size != null && (
         <text x={c[0]} y={c[1]} textAnchor="middle" dominantBaseline="central" fontSize={size}
           fill={isHole ? "var(--gimel-accent)" : kind === "room" ? "var(--g-text-strong)" : "var(--g-muted)"}
+          style={halo ? { strokeWidth: halo, strokeLinejoin: "round", stroke: isHole ? "var(--g-floor-outside)" : undefined } : { strokeWidth: 0 }}
           className="twin-map-text" pointerEvents="none">
           {labelText}
         </text>

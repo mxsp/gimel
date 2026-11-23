@@ -895,20 +895,20 @@ export function carveWallIndentation(
   const rawAlong = relX * tx + relY * ty;
   let depth = snapV(relX * nx + relY * ny);
 
-  // Falls nur geklickt (Tiefe ~ 0): automatisch nach innen in die Halle einbuchten!
+  // Falls nur geklickt (Tiefe ~ 0): sanfte 0,5 m Start-Einbuchtung nach innen (wächst beim Ziehen live mit!).
   if (Math.abs(depth) < step) {
     const midX = (p[0] + q[0]) / 2;
     const midY = (p[1] + q[1]) / 2;
     const testIn: [number, number] = [midX + nx * 0.5, midY + ny * 0.5];
     const sign = pointInPolygon(testIn, pts) ? 1 : -1;
-    const autoD = Math.max(step * 2, Math.min(6, snapV(len * 0.25)));
+    const autoD = Math.max(step, Math.min(1.0, snapV(len * 0.12)));
     depth = sign * autoD;
   }
 
   const maxW = Math.max(step, len - step * 2);
   const w = Math.min(
     maxW,
-    Math.max(step * 2, fixedWidth ? snapV(fixedWidth) : snapV(Math.min(10, Math.max(2, len * 0.35)))),
+    Math.max(step * 2, fixedWidth ? snapV(fixedWidth) : snapV(Math.min(8, Math.max(1.5, len * 0.3)))),
   );
   const halfW = w / 2;
   const centerAlong = Math.max(step + halfW, Math.min(len - step - halfW, snapV(rawAlong)));

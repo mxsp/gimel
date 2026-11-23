@@ -2292,9 +2292,9 @@ a.heute-row .bp5-tag { flex-shrink: 0; }
 .hall-editor .editor-main { display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 8px 8px 4px 16px; }
 .hall-editor .floor-issues { flex: none; max-height: 84px; margin: 0; overflow-y: auto; }
 .hall-editor .floor-issues:focus-visible { outline: 2px solid var(--gimel-accent-ink); }
-.hall-editor .floor-card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.hall-editor .floor-card { flex: 1; display: flex; flex-direction: column; min-height: 460px; }
 .hall-editor .floor-toolbar { position: relative; z-index: 2; background: var(--g-surface-2); min-height: 46px; box-sizing: border-box; }
-.hall-editor .floor-stage { flex: 1; min-height: 0; background: var(--g-floor-outside); overflow: hidden; }
+.hall-editor .floor-stage { flex: 1; min-height: 400px; position: relative; background: var(--g-floor-outside); overflow: hidden; }
 /* Tore sitzen am Rand der Halle: der Einzug lässt ihren Namen stehen, wie im Leitstand. */
 .hall-editor .floor-svg { position: absolute; top: 0; bottom: 0; left: 28px; width: calc(100% - 56px); overflow: visible; }
 .hall-editor .floor-legend { align-items: center; gap: 2px 12px; padding: 0 2px; }

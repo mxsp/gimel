@@ -171,27 +171,46 @@ export default function FloorAdmin({
   };
   // ------------------------------------------------- Geschichte des Grundrisses
   const [hist, setHist] = useState<Hist>({ past: [], future: [] });
+  const [draftPast, setDraftPast] = useState<[number, number][][]>([]);
+
+  const pushDraftUndo = useCallback((snapshot?: [number, number][]) => {
+    setDraftPast((p) => [...p.slice(-39), snapshot ?? draft]);
+  }, [draft]);
 
   /** Jede Änderung an der Halle geht hierdurch — damit Strg+Z alles kann,
       nicht nur den Umriss wie in der ersten Fassung. */
   const mutate = useCallback((next: Partial<Floor>) => {
     setHist((h) => ({ past: [...h.past.slice(-59), floorRef.current], future: [] }));
+    floorRef.current = { ...floorRef.current, ...next };
     setFloor((f) => ({ ...f, ...next }));
   }, []);
 
   const undo = useCallback(() => {
+    if (mode !== "select" && mode !== "measure" && (layer === "outline" || layer === "zone" || layer === "obstacle") && draftPast.length > 0) {
+      const prevDraft = draftPast[draftPast.length - 1];
+      setDraftPast((p) => p.slice(0, -1));
+      setDraft(prevDraft);
+      if (prevDraft.length < 3) setDraftClosed(false);
+      return;
+    }
     setHist((h) => {
       const prev = h.past[h.past.length - 1];
       if (!prev) return h;
+      floorRef.current = prev;
       setFloor(prev);
+      if (mode !== "select" && layer === "outline") {
+        setDraft([...(prev.outline ?? [])]);
+        setDraftClosed((prev.outline?.length ?? 0) >= 3);
+      }
       return { past: h.past.slice(0, -1), future: [floorRef.current, ...h.future] };
     });
-  }, []);
+  }, [mode, layer, draftPast]);
 
   const redo = useCallback(() => {
     setHist((h) => {
       const next = h.future[0];
       if (!next) return h;
+      floorRef.current = next;
       setFloor(next);
       return { past: [...h.past, floorRef.current], future: h.future.slice(1) };
     });
@@ -206,10 +225,15 @@ export default function FloorAdmin({
       return false;
     }
     if (layer === "outline") {
-      mutate({ outline: draft });
+      const changed = JSON.stringify(draft) !== JSON.stringify(floorRef.current.outline ?? []);
+      if (changed) {
+        mutate({ outline: draft });
+        toastSuccess(`Umriss übernommen — ${plural(draft.length, "Punkt", "Punkte")}, ${polygonArea(draft).toFixed(0)} m².`);
+      }
       setDraft([]);
       setDraftClosed(false);
-      toastSuccess(`Umriss übernommen — ${plural(draft.length, "Punkt", "Punkte")}, ${polygonArea(draft).toFixed(0)} m².`);
+      setDraftPast([]);
+      setMode("select");
       return true;
     }
     if (layer === "zone") {
@@ -219,10 +243,11 @@ export default function FloorAdmin({
         colour: kindMeta?.colour ?? "#8e5cb8",
         points: draft,
       };
-      const zones = [...(floor.zones ?? [])];
+      const zones = [...(floorRef.current.zones ?? [])];
       if (zoneIdx >= 0) zones[zoneIdx] = z; else zones.push(z);
       mutate({ zones });
-      setZoneIdx(-1); setDraft([]); setDraftClosed(false); setDraftName("");
+      setZoneIdx(-1); setDraft([]); setDraftClosed(false); setDraftPast([]); setDraftName("");
+      setMode("select");
       toastSuccess(`Zone „${z.name}" übernommen.`);
       return true;
     }
@@ -235,25 +260,43 @@ export default function FloorAdmin({
         ...(draftHeightM != null && Number.isFinite(draftHeightM) && draftHeightM > 0
           ? { height_m: Math.round(draftHeightM * 100) / 100 } : {}),
       };
-      const obstacles = [...(floor.obstacles ?? [])];
+      const obstacles = [...(floorRef.current.obstacles ?? [])];
       if (obstacleIdx >= 0) obstacles[obstacleIdx] = o; else obstacles.push(o);
       mutate({ obstacles });
-      setObstacleIdx(-1); setDraft([]); setDraftClosed(false); setDraftName("");
+      setObstacleIdx(-1); setDraft([]); setDraftClosed(false); setDraftPast([]); setDraftName("");
       setDraftObstacleKind(""); setDraftHeightM(null);
+      setMode("select");
       toastSuccess(`Bauteil „${o.name}" übernommen.`);
       return true;
     }
     return false;
   };
 
+  const closeDraftLoop = () => {
+    if (draft.length < 3) return;
+    if (polygonSelfIntersects(draft)) {
+      toastError("Der geschlossene Umriss würde sich selbst schneiden — bitte letzten Punkt anpassen.");
+      return;
+    }
+    setDraftClosed(true);
+    if (layer === "outline") {
+      mutate({ outline: draft });
+      toastSuccess(`Umriss geschlossen (${polygonArea(draft).toFixed(0)} m²) — Wände/Einbuchtungen feinjustieren oder „Halle speichern“.`);
+    }
+  };
+
   const startLayer = (l: FloorLayer) => {
+    if (l !== layer && (layer === "outline" || layer === "zone" || layer === "obstacle") && draftClosed && draft.length >= 3 && !polygonSelfIntersects(draft)) {
+      commitDraft();
+    }
     const isPoly = l === "outline" || l === "zone" || l === "obstacle";
     setLayer(l);
     setMode(mode === "rect" && isPoly ? "rect" : "draw");
     setAisleAnchor(null);
-    const outlinePts = l === "outline" ? [...(floor.outline ?? [])] : [];
+    const outlinePts = l === "outline" ? [...(floorRef.current.outline ?? [])] : [];
     setDraft(outlinePts);
     setDraftClosed(l === "outline" && outlinePts.length >= 3);
+    setDraftPast([]);
     setZoneIdx(-1); setObstacleIdx(-1); setDraftName("");
     setDraftObstacleKind(""); setDraftHeightM(null);
   };
@@ -262,7 +305,7 @@ export default function FloorAdmin({
     const z = floor.zones?.[i];
     if (!z) return;
     setLayer("zone"); setMode("draw"); setZoneIdx(i); setObstacleIdx(-1);
-    setDraft([...z.points]); setDraftClosed(true); setDraftName(z.name); setDraftKind(z.kind || "zone");
+    setDraft([...z.points]); setDraftClosed(true); setDraftPast([]); setDraftName(z.name); setDraftKind(z.kind || "zone");
   };
 
   const editObstacle = (i: number) => {
@@ -270,7 +313,7 @@ export default function FloorAdmin({
     if (!o) return;
     const k = obstacleKind(o);
     setLayer("obstacle"); setMode("draw"); setObstacleIdx(i); setZoneIdx(-1);
-    setDraft([...o.points]); setDraftClosed(true); setDraftName(o.name);
+    setDraft([...o.points]); setDraftClosed(true); setDraftPast([]); setDraftName(o.name);
     setDraftObstacleKind(k);
     setDraftHeightM(o.height_m ?? obstacleHeight(o, floor.height_m || 6));
   };
@@ -440,6 +483,7 @@ export default function FloorAdmin({
       const d2 = Math.hypot(orig[0] - c2[0], orig[1] - c2[1]);
       out.push(d1 <= d2 ? c1 : c2);
     }
+    pushDraftUndo();
     setDraft(out);
     toastSuccess("Rechtwinklig geglättet — Strg+Z macht es rückgängig.");
   };
@@ -460,18 +504,23 @@ export default function FloorAdmin({
   };
 
   const startDoorKind = (kind: Door["kind"]) => {
+    if ((layer === "outline" || layer === "obstacle" || layer === "zone") && draftClosed && draft.length >= 3 && !polygonSelfIntersects(draft)) {
+      commitDraft();
+    }
     setDoorKind(kind);
     setLayer("door");
     setMode("draw");
     setAisleAnchor(null);
     setDraft([]);
+    setDraftClosed(false);
+    setDraftPast([]);
     setZoneIdx(-1);
     setObstacleIdx(-1);
   };
 
   const addStructuralPreset = (preset: StructuralPreset) => {
-    // Laufenden gültigen Bauteil-/Zonen-Entwurf zuerst sichern, statt still zu verwerfen.
-    if ((layer === "obstacle" || layer === "zone") && draft.length >= 3 && !polygonSelfIntersects(draft)) {
+    // Laufenden gültigen Umriss-/Bauteil-/Zonen-Entwurf zuerst sichern, statt still zu verwerfen.
+    if ((layer === "outline" || layer === "obstacle" || layer === "zone") && draftClosed && draft.length >= 3 && !polygonSelfIntersects(draft)) {
       commitDraft();
     }
     const curObstacles = floorRef.current.obstacles ?? [];
@@ -500,6 +549,7 @@ export default function FloorAdmin({
     setDraftHeightM(obstacleHeight({ name: preset.name, kind: preset.id }, floorRef.current.height_m || 6));
     setDraft(poly);
     setDraftClosed(true);
+    setDraftPast([]);
     setMode("draw");
     toastInfo(`${preset.label} als Entwurf angelegt — Fläche ziehen, drehen (R) oder „Anlegen“ klicken.`);
   };
@@ -854,11 +904,13 @@ export default function FloorAdmin({
       if (e.key === "Escape") { finishDrawing(); return; }
       if (e.key === "Enter" && mode !== "select" && mode !== "measure" && polygonLayer && draft.length >= 3) {
         e.preventDefault();
-        finishDrawing();
+        if (!draftClosed) closeDraftLoop();
+        else finishDrawing();
         return;
       }
       if ((e.key === "Backspace" || e.key === "Delete") && mode !== "select" && mode !== "measure" && polygonLayer && !draftClosed && draft.length > 0) {
         e.preventDefault();
+        pushDraftUndo();
         setDraft((d) => d.slice(0, -1));
         return;
       }
@@ -1076,7 +1128,7 @@ export default function FloorAdmin({
         </p>
         {!phone && <div className="hall-head-actions">
           <ButtonGroup minimal>
-            <Button small icon="undo" disabled={!hist.past.length} title="Rückgängig (Strg+Z)" onClick={undo} />
+            <Button small icon="undo" disabled={!hist.past.length && !draftPast.length} title="Rückgängig (Strg+Z)" onClick={undo} />
             <Button small icon="redo" disabled={!hist.future.length} title="Wiederholen (Strg+Umschalt+Z)" onClick={redo} />
           </ButtonGroup>
           <Button small icon="import" text="Import / Export" onClick={() => {
@@ -1104,11 +1156,21 @@ export default function FloorAdmin({
         <div className="editor-tools">
           <ButtonGroup>
             <Button small icon="hand" active={mode === "select"} text="Auswählen"
-              onClick={() => { setMode("select"); setDraft([]); setDraftClosed(false); setZoneIdx(-1); setObstacleIdx(-1); setAisleAnchor(null); }} />
+              onClick={() => {
+                if ((layer === "outline" || layer === "zone" || layer === "obstacle") && draftClosed && draft.length >= 3 && !polygonSelfIntersects(draft)) {
+                  commitDraft();
+                }
+                setMode("select"); setDraft([]); setDraftClosed(false); setDraftPast([]); setZoneIdx(-1); setObstacleIdx(-1); setAisleAnchor(null);
+              }} />
             <Button small icon="polygon-filter" active={mode === "draw"} text="Zeichnen"
               onClick={() => startLayer(layer)} />
             <Button small icon="widget" active={mode === "rect"} text="Rechteck"
-              onClick={() => { setMode("rect"); setDraft([]); setDraftClosed(false); if (layer === "aisle" || layer === "door") setLayer("outline"); }} />
+              onClick={() => {
+                if ((layer === "outline" || layer === "zone" || layer === "obstacle") && draftClosed && draft.length >= 3 && !polygonSelfIntersects(draft)) {
+                  commitDraft();
+                }
+                setMode("rect"); setDraft([]); setDraftClosed(false); setDraftPast([]); if (layer === "aisle" || layer === "door") setLayer("outline");
+              }} />
             <Button small icon="path-search" active={mode === "measure"} text="Messen"
               onClick={() => setMode("measure")} />
           </ButtonGroup>
@@ -1134,13 +1196,11 @@ export default function FloorAdmin({
           <div className="editor-fw-group">
             <span className="editor-fw-label">Struktur:</span>
             {STRUCTURAL_PRESETS.map((preset) => (
-              <Tooltip key={preset.id} content={preset.hint} placement="top">
-                <Button small minimal icon={preset.icon} text={preset.label}
-                  onClick={() => addStructuralPreset(preset)} />
-              </Tooltip>
+              <Button key={preset.id} small minimal icon={preset.icon} text={preset.label}
+                title={preset.hint}
+                onClick={() => addStructuralPreset(preset)} />
             ))}
           </div>
-          <span className="sep" />
           <div className="editor-fw-group">
             <span className="editor-fw-label">Zugänge:</span>
             {DOOR_KINDS.map((k) => (
@@ -1170,10 +1230,10 @@ export default function FloorAdmin({
                   <Button small icon="widget" text="Rechteck 40 × 24 m setzen" onClick={() => {
                     const pts = templateRect(40, 24);
                     mutate({ outline: pts, aisles: suggestAisles(pts) });
-                    setDraft(pts); setDraftClosed(true); setLayer("outline"); setMode("draw");
+                    setDraft(pts); setDraftClosed(true); setDraftPast([]); setLayer("outline"); setMode("draw");
                   }} />
                   <Button small icon="polygon-filter" text="Frei zeichnen" onClick={() => {
-                    setLayer("outline"); setMode("draw"); setDraft([]); setDraftClosed(false);
+                    setLayer("outline"); setMode("draw"); setDraft([]); setDraftClosed(false); setDraftPast([]);
                   }} />
                   <Button small icon="import" text="DXF importieren" onClick={() => setDxfOpen(true)} />
                 </div>
@@ -1193,21 +1253,29 @@ export default function FloorAdmin({
             draft={polygonLayer ? draft : undefined}
             draftClosed={polygonLayer && draftClosed}
             draftColour={draftColour}
-            onDraftPoint={(p) => setDraft((d) => [...d, p])}
-            onDraftMoveStart={() => { /* Punktzug ist lokal — Geschichte erst beim Übernehmen */ }}
+            onDraftPoint={(p) => { pushDraftUndo(); setDraft((d) => [...d, p]); }}
+            onDraftMoveStart={() => { pushDraftUndo(); }}
             onDraftMove={(idx, p) => setDraft((d) => d.map((q, i) => (i === idx ? p : q)))}
             onDraftReplace={(pts) => setDraft(pts)}
-            onDraftDelete={(idx) => setDraft((d) => {
-              const next = d.filter((_, i) => i !== idx);
-              if (next.length < 3) setDraftClosed(false);
-              return next;
-            })}
-            onDraftInsert={(after, p) => setDraft((d) => [...d.slice(0, after + 1), p, ...d.slice(after + 1)])}
+            onDraftDelete={(idx) => {
+              pushDraftUndo();
+              setDraft((d) => {
+                const next = d.filter((_, i) => i !== idx);
+                if (next.length < 3) setDraftClosed(false);
+                return next;
+              });
+            }}
+            onDraftInsert={(after, p) => {
+              pushDraftUndo();
+              setDraft((d) => [...d.slice(0, after + 1), p, ...d.slice(after + 1)]);
+            }}
+            onDraftCloseLoop={closeDraftLoop}
             onDraftFinish={finishDrawing}
-            onDraftStartNew={() => { setDraft([]); setDraftClosed(false); setMode("draw"); }}
-            onDraftReopen={() => { setDraftClosed(false); setMode("draw"); }}
+            onDraftStartNew={() => { pushDraftUndo(); setDraft([]); setDraftClosed(false); setMode("draw"); }}
+            onDraftReopen={() => { pushDraftUndo(); setDraftClosed(false); setMode("draw"); }}
             rectMode={!phone && mode === "rect"}
             onDraftRect={(pts) => {
+              pushDraftUndo();
               if (layer === "outline") {
                 mutate({ outline: pts });
                 setDraft(pts);
@@ -1299,7 +1367,7 @@ export default function FloorAdmin({
           <HallSummary floor={floor} stations={stations} selectedId={selectedId} onPick={selectStation} />
         ) : <div className="editor-rail">
             {mode !== "select" && mode !== "measure" && (() => {
-              const selfInt = polygonLayer && draft.length >= 4 && polygonSelfIntersects(draft);
+              const selfInt = polygonLayer && draftClosed && draft.length >= 4 && polygonSelfIntersects(draft);
               const rectInfo = polygonLayer ? rectDimensions(draft) : null;
               const circleInfo = polygonLayer ? circleDimensions(draft) : null;
               return (
@@ -1307,7 +1375,9 @@ export default function FloorAdmin({
                 <div className="card-title-row">
                   <h2 className="card-title">
                     {LAYER_LABEL[layer]}
-                    {polygonLayer && ` — ${plural(draft.length, "Punkt", "Punkte")}`}
+                    {polygonLayer && (circleInfo
+                      ? ` — Ø ${circleInfo.diameter.toLocaleString("de-DE", { maximumFractionDigits: 2 })} m`
+                      : ` — ${plural(draft.length, "Punkt", "Punkte")}`)}
                     {layer === "aisle" && ` — ${floor.aisles?.nodes?.length ?? 0} Knoten, ${floor.aisles?.edges?.length ?? 0} Kanten`}
                     {layer === "door" && ` — ${floor.doors?.length ?? 0} Zugänge`}
                   </h2>
@@ -1347,36 +1417,40 @@ export default function FloorAdmin({
                                 {STRUCTURAL_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                                 <option value="obstacle">Sonstiges Hindernis</option>
                               </HTMLSelect>
-                              <NumericInput className="draw-num" aria-label="Höhe (m)" title="Höhe in Metern (Semi-3D / 3D)"
-                                value={draftHeightM ?? obstacleHeight({ name: draftName, kind: draftObstacleKind || undefined }, floor.height_m || 6)}
-                                min={0.2} max={Math.max(6, floor.height_m || 6)} stepSize={0.25} minorStepSize={0.1}
-                                onValueChange={(v) => { if (Number.isFinite(v)) setDraftHeightM(Math.max(0.2, Math.min(Math.max(6, floor.height_m || 6), v))); }} />
+                              {draftObstacleKind !== "bore" && draftObstacleKind !== "cutout" && (
+                                <NumericInput className="draw-num" aria-label="Höhe (m)" title="Höhe in Metern (Semi-3D / 3D)"
+                                  value={draftHeightM ?? obstacleHeight({ name: draftName, kind: draftObstacleKind || undefined }, floor.height_m || 6)}
+                                  min={0.2} max={Math.max(6, floor.height_m || 6)} stepSize={0.25} minorStepSize={0.1}
+                                  onValueChange={(v) => { if (Number.isFinite(v)) setDraftHeightM(Math.max(0.2, Math.min(Math.max(6, floor.height_m || 6), v))); }} />
+                              )}
                             </>
                           )}
                         </>
                       )}
                       {draft.length >= 3 && (
                         <div className="draw-transform-row">
-                          <ButtonGroup minimal>
-                            <Button small icon="undo" text="-90°" title="90° gegen den Uhrzeigersinn drehen"
-                              onClick={() => setDraft((d) => rotatePolygon(d, -90))} />
-                            <Button small text="-15°" title="15° gegen den Uhrzeigersinn (Umschalt+R)"
-                              onClick={() => setDraft((d) => rotatePolygon(d, -15))} />
-                            <Button small text="+15°" title="15° im Uhrzeigersinn (R)"
-                              onClick={() => setDraft((d) => rotatePolygon(d, 15))} />
-                            <Button small icon="redo" text="+90°" title="90° im Uhrzeigersinn drehen"
-                              onClick={() => setDraft((d) => rotatePolygon(d, 90))} />
-                          </ButtonGroup>
+                          {!circleInfo && (
+                            <ButtonGroup minimal>
+                              <Button small icon="undo" text="-90°" title="90° gegen den Uhrzeigersinn drehen"
+                                onClick={() => { pushDraftUndo(); setDraft((d) => rotatePolygon(d, -90)); }} />
+                              <Button small text="-15°" title="15° gegen den Uhrzeigersinn (Umschalt+R)"
+                                onClick={() => { pushDraftUndo(); setDraft((d) => rotatePolygon(d, -15)); }} />
+                              <Button small text="+15°" title="15° im Uhrzeigersinn (R)"
+                                onClick={() => { pushDraftUndo(); setDraft((d) => rotatePolygon(d, 15)); }} />
+                              <Button small icon="redo" text="+90°" title="90° im Uhrzeigersinn drehen"
+                                onClick={() => { pushDraftUndo(); setDraft((d) => rotatePolygon(d, 90)); }} />
+                            </ButtonGroup>
+                          )}
                           {rectInfo && (
                             <div className="draw-rect-dims">
                               <label className="sub">L (m)
                                 <NumericInput small className="draw-dim-num" aria-label="Länge (m)" buttonPosition="none"
-                                  value={rectInfo.w} min={0.1} stepSize={0.25}
+                                  value={rectInfo.w} min={0.1} stepSize={0.25} minorStepSize={0.05}
                                   onValueChange={(v) => { if (Number.isFinite(v) && v >= 0.1) setDraft((d) => resizeRectPolygon(d, v, rectInfo.d)); }} />
                               </label>
                               <label className="sub">B (m)
                                 <NumericInput small className="draw-dim-num" aria-label="Breite (m)" buttonPosition="none"
-                                  value={rectInfo.d} min={0.1} stepSize={0.05}
+                                  value={rectInfo.d} min={0.1} stepSize={0.25} minorStepSize={0.05}
                                   onValueChange={(v) => { if (Number.isFinite(v) && v >= 0.1) setDraft((d) => resizeRectPolygon(d, rectInfo.w, v)); }} />
                               </label>
                             </div>
@@ -1388,16 +1462,26 @@ export default function FloorAdmin({
                                   value={circleInfo.diameter} min={0.1} stepSize={0.25} minorStepSize={0.05}
                                   onValueChange={(v) => { if (Number.isFinite(v) && v >= 0.1) setDraft((d) => resizeCirclePolygon(d, v)); }} />
                               </label>
+                              <label className="sub">X (m)
+                                <NumericInput small className="draw-dim-num" aria-label="Mittelpunkt X (m)" buttonPosition="none"
+                                  value={Math.round(circleInfo.cx * 100) / 100} stepSize={0.25} minorStepSize={0.05}
+                                  onValueChange={(v) => { if (Number.isFinite(v)) setDraft((d) => translatePolygon(d, v - circleInfo.cx, 0)); }} />
+                              </label>
+                              <label className="sub">Y (m)
+                                <NumericInput small className="draw-dim-num" aria-label="Mittelpunkt Y (m)" buttonPosition="none"
+                                  value={Math.round(circleInfo.cy * 100) / 100} stepSize={0.25} minorStepSize={0.05}
+                                  onValueChange={(v) => { if (Number.isFinite(v)) setDraft((d) => translatePolygon(d, 0, v - circleInfo.cy)); }} />
+                              </label>
                             </div>
                           )}
                         </div>
                       )}
                       {!draftClosed && (
                         <Button small icon="small-minus" disabled={!draft.length} text="Letzten Punkt"
-                          onClick={() => setDraft(draft.slice(0, -1))} />
+                          onClick={() => { pushDraftUndo(); setDraft(draft.slice(0, -1)); }} />
                       )}
                       <Button small icon="disable" disabled={!draft.length} text="Leeren"
-                        onClick={() => { setDraft([]); setDraftClosed(false); }} />
+                        onClick={() => { pushDraftUndo(); setDraft([]); setDraftClosed(false); }} />
                       {layer === "outline" && (
                         <>
                           <Button small icon="swap-horizontal" disabled={draft.length < 3} text="Rechtwinklig"
@@ -1409,11 +1493,11 @@ export default function FloorAdmin({
                             onClick={deleteOutline} />
                         </>
                       )}
-                      {!draftClosed && <ExactPoint onAdd={(p) => setDraft([...draft, p])} />}
+                      {!draftClosed && <ExactPoint onAdd={(p) => { pushDraftUndo(); setDraft([...draft, p]); }} />}
                       {(zoneIdx >= 0 || obstacleIdx >= 0) && (
                         <>
                           <Button small minimal icon="cross" text="Abbrechen"
-                            onClick={() => { setDraft([]); setDraftClosed(false); setZoneIdx(-1); setObstacleIdx(-1); setMode("select"); }} />
+                            onClick={() => { setDraft([]); setDraftClosed(false); setDraftPast([]); setZoneIdx(-1); setObstacleIdx(-1); setMode("select"); }} />
                           <Button small intent="danger" icon="trash" text="Löschen"
                             onClick={() => {
                               if (layer === "zone" && zoneIdx >= 0) {
@@ -1423,15 +1507,15 @@ export default function FloorAdmin({
                                 mutate({ obstacles: floor.obstacles.filter((_, k) => k !== obstacleIdx) });
                                 setObstacleIdx(-1);
                               }
-                              setDraft([]); setDraftClosed(false); setMode("select");
+                              setDraft([]); setDraftClosed(false); setDraftPast([]); setMode("select");
                             }} />
                         </>
                       )}
                       <Button small intent="primary" icon="tick" disabled={draft.length < 3 || selfInt}
                         title={selfInt ? "Selbstschneidendes Polygon kann nicht übernommen werden." : undefined}
-                        text={layer === "outline" ? "Umriss übernehmen"
+                        text={!draftClosed ? "Umriss schließen" : layer === "outline" ? "Umriss übernehmen"
                           : zoneIdx >= 0 || obstacleIdx >= 0 ? "Änderung übernehmen" : "Anlegen"}
-                        onClick={() => { commitDraft(); }} />
+                        onClick={() => { if (!draftClosed) closeDraftLoop(); else commitDraft(); }} />
                     </>
                   )}
                   {layer === "aisle" && (
@@ -1486,7 +1570,7 @@ export default function FloorAdmin({
                 {/* Punkteliste — dieselben Punkte wie im Plan, nur als Zahl. Wer nach
                     Schema-Maßen baut, tippt hier, statt zu ziehen; wer zieht, liest
                     hier nach, was daraus wurde. */}
-                {polygonLayer && draft.length > 0 && (
+                {polygonLayer && draft.length > 0 && !circleInfo && (
                   <DraftPoints
                     points={draft}
                     onChange={(pts) => setDraft(pts)}

@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gimel"
-version = "0.3.1"
+version = "0.3.2"
 description = "Order and production management for manufacturers and job shops (in development, not released)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Proprietary — FyreFly Systems GbR" }
 authors = [{ name = "FyreFly Systems GbR" }]
 dependencies = [
   "fastapi>=0.115",

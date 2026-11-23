@@ -310,7 +310,18 @@ body.studio-body { margin: 0; background: var(--g-bg); color: var(--g-text); ove
   overflow-y: auto;
   padding-right: 4px;
 }
+.studio-editing.studio,
+.studio-editing.studio.studio-has-inspector {
+  grid-template-columns: 240px minmax(0, 1fr) 0 auto;
+}
+.studio-editing.studio.studio-left-closed,
+.studio-editing.studio.studio-left-closed.studio-has-inspector {
+  grid-template-columns: 0 minmax(0, 1fr) 0 auto;
+}
+.studio-editing .studio-right { display: none; }
 .studio-editing .studio-stage { background: var(--g-bg); }
+.studio-edit .floor-card { min-height: 460px; }
+.studio-edit .floor-stage { min-height: 400px; }
 .route-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .route-list > li { border: 1px solid var(--g-rule); border-radius: var(--g-radius); padding: 8px 10px; background: var(--g-surface); }
 .route-list > li.is-open { border-color: var(--g-info); }
