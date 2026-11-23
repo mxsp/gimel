@@ -50,15 +50,19 @@ pause
 "%~dp0gimel.exe" --mode setup-ui %*
 "@ | Set-Content -Encoding ASCII "$Root\packaging\dist\Start-Gimel-Setup.bat"
 
-    $Iscc = Get-Command iscc -ErrorAction SilentlyContinue
-    if (-not $Iscc -and (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
-        $Iscc = Get-Item "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    $IsccPath = $null
+    $IsccCmd = Get-Command iscc -ErrorAction SilentlyContinue
+    if ($IsccCmd) {
+        $IsccPath = $IsccCmd.Source
+    } elseif (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+        $IsccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
     }
-    if ($Iscc) {
-        Write-Host "==> 4/4 Building Windows UI Installer (Gimel-Setup-x64.exe) via Inno Setup"
+    if ($IsccPath) {
+        Write-Host "==> 4/4 Building Windows UI Installer (Gimel-Setup-x64.exe) via Inno Setup ($IsccPath)"
         $VerLine = Select-String -Path "$Root\gimel\version.py" -Pattern 'APP_VERSION\s*=\s*"([^"]+)"'
         $AppVer = if ($VerLine) { $VerLine.Matches[0].Groups[1].Value } else { "0.2.2" }
-        & $Iscc.FullName "/DAppVersion=$AppVer" "$Root\packaging\windows\gimel-setup.iss"
+        & $IsccPath "/DAppVersion=$AppVer" "$Root\packaging\windows\gimel-setup.iss"
+        if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
     } else {
         Write-Host "Note: Inno Setup (iscc) not found; skipped Gimel-Setup-x64.exe."
     }
