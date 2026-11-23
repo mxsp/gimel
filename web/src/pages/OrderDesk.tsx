@@ -404,6 +404,22 @@ export default function OrderDesk() {
   const updateLine = (id: number, patch: Partial<DeskLine>) =>
     setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
+  const updateLineBolts = (l: DeskLine, patch: Partial<Pick<DeskLine, "bn" | "bd" | "bc">>) => {
+    const nextBn = Math.max(0, Math.min(200, Math.round(patch.bn ?? l.bn)));
+    const nextBd = Math.max(0, patch.bd ?? l.bd);
+    const nextBc = Math.max(0, patch.bc ?? l.bc);
+    const nextPatch: Partial<DeskLine> = { bn: nextBn, bd: nextBd, bc: nextBc };
+    if (l.shape && typeof l.shape === "object") {
+      nextPatch.shape = {
+        ...l.shape,
+        bolts: nextBn > 0 && nextBd > 0 && nextBc > 0
+          ? { n: nextBn, d: nextBd, bc: nextBc, phase: 0 }
+          : null,
+      };
+    }
+    updateLine(l.id, nextPatch);
+  };
+
   const removeLine = (id: number) => setLines((ls) => ls.filter((l) => l.id !== id));
 
   // ---------- Auftrag anlegen ----------
@@ -821,7 +837,7 @@ export default function OrderDesk() {
             <tr>
               <th>Bezeichnung</th><th>Werkstoff</th><th className="num">Dicke mm</th>
               <th className="num">Stück</th><th className="num">Außen Ø / B</th>
-              <th className="num">Bohrung / H</th><th>Quelle</th>
+              <th className="num">Bohrung / H</th><th>Bohrungen (Anz. × Ø @ LK)</th><th>Quelle</th>
               <th className="num">Preis netto</th><th><span className="sr-only">Aktion</span></th>
             </tr>
           </thead>
@@ -862,7 +878,7 @@ export default function OrderDesk() {
                              style={{ width: 56 }} value={l.q}
                              onChange={(e) => updateLine(l.id, { q: Number(e.target.value) })} />
                     </td>
-                    <td className="num" colSpan={2}>
+                    <td className="num" colSpan={3}>
                       <span className="sub" style={{ marginRight: 6 }}>brutto je Stück</span>
                       <input className="bp5-input" type="number" min="0" step="0.01"
                              style={{ width: 100 }} value={l.price_gross}
@@ -902,6 +918,22 @@ export default function OrderDesk() {
                   <td className="num">
                     <input className="bp5-input" type="number" style={{ width: 80 }} value={l.di}
                            onChange={(e) => updateLine(l.id, { di: Number(e.target.value) })} />
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <input className="bp5-input" type="number" min="0" max="200" step="1"
+                           style={{ width: 46 }} value={l.bn}
+                           title="Anzahl Bohrungen" aria-label="Anzahl Bohrungen" placeholder="Anz."
+                           onChange={(e) => updateLineBolts(l, { bn: Number(e.target.value) })} />
+                    <span className="sub" style={{ margin: "0 4px" }}>× Ø</span>
+                    <input className="bp5-input" type="number" min="0" step="0.5"
+                           style={{ width: 54 }} value={l.bd}
+                           title="Bohrungs-Ø (mm)" aria-label="Bohrungs-Ø (mm)" placeholder="Ø"
+                           onChange={(e) => updateLineBolts(l, { bd: Number(e.target.value) })} />
+                    <span className="sub" style={{ margin: "0 4px" }}>@ LK</span>
+                    <input className="bp5-input" type="number" min="0" step="1"
+                           style={{ width: 60 }} value={l.bc}
+                           title="Lochkreis-Ø (mm)" aria-label="Lochkreis-Ø (mm)" placeholder="LK"
+                           onChange={(e) => updateLineBolts(l, { bc: Number(e.target.value) })} />
                   </td>
                   <td><Tag minimal intent={src.intent}>{src.label}</Tag></td>
                   {price}
@@ -1247,13 +1279,13 @@ export default function OrderDesk() {
             <dd className="mono">{quote ? fmtEur(quote.gross) : "—"}</dd>
           </div>
         </dl>
-        <div className="desk-live-actions">
-          <Button small fill intent={canCreate ? "primary" : "none"} icon="tick"
-                  text={activeStep === 4 ? "Auftrag anlegen" : "Zu Schritt 4: Prüfen"}
-                  loading={activeStep === 4 && busy}
-                  disabled={activeStep === 4 && (!canCreate || result !== null)}
-                  onClick={() => (activeStep === 4 ? createOrder() : goToStep(4))} />
-        </div>
+        {activeStep !== 4 && (
+          <div className="desk-live-actions">
+            <Button small fill intent={canCreate ? "primary" : "none"} icon="tick"
+                    text="Zu Schritt 4: Prüfen"
+                    onClick={() => goToStep(4)} />
+          </div>
+        )}
       </aside>
       </div>
 

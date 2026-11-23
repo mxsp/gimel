@@ -12,12 +12,18 @@ import {
   Station,
   TYPE_LABEL,
   Zone,
+  carveWallIndentation,
+  circleDimensions,
   doorDirection,
   effectiveDoorKind,
   heatColour,
+  isFloorHoleObstacle,
+  moveWallSegmentOrthogonal,
   nearestNode,
   obstacleKind,
+  openOutlinePath,
   outlinePath,
+  outlineWithHolesPath,
   polygonArea,
   polygonCentroid,
   routePoints,
@@ -82,6 +88,8 @@ type Drag =
   | { kind: "rotate"; id: number; base: Station }
   | { kind: "draft"; idx: number }
   | { kind: "draft-body"; start: [number, number]; base: [number, number][] }
+  | { kind: "draft-indent"; edgeIdx: number; base: [number, number][] }
+  | { kind: "draft-edge"; edgeIdx: number; base: [number, number][] }
   | { kind: "node"; idx: number }
   | { kind: "door"; idx: number };
 
@@ -131,6 +139,8 @@ export interface FloorPlanProps {
   onDraftFinish?: () => void;
   /** Neu zeichnen starten (leert aktuellen Entwurf und öffnet Punkteingabe). */
   onDraftStartNew?: () => void;
+  /** Geschlossenen Entwurf wieder öffnen, um weitere Punkte / Einbuchtungen anzuhängen. */
+  onDraftReopen?: () => void;
   /** Rechteck-Modus: Ziehen oder zwei Klicks, vier Punkte kommen zurück. */
   rectMode?: boolean;
   onDraftRect?: (pts: [number, number][]) => void;
@@ -219,6 +229,7 @@ export default function FloorPlan({
   onDraftInsert,
   onDraftFinish,
   onDraftStartNew,
+  onDraftReopen,
   rectMode = false,
   onDraftRect,
   editingObstacleIdx = -1,
@@ -427,10 +438,14 @@ export default function FloorPlan({
     e.stopPropagation();
     dragRef.current = d;
     setDragging(true);
-    // Am Griff selbst festhalten, nicht am SVG: bewegt die Maus sich weiter,
-    // laufen die Pointer-Events hier ein und blasen zum SVG hoch — und ein
-    // Klick auf die Station bleibt ein Klick auf die Station (Auswahl!).
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    // Bei Entwurfs-Operationen (Ecke, Fläche, Einbuchtung, Wand) können Punkte im
+    // Array eingefügt werden -> immer am SVG selbst festhalten, damit kein Re-Render
+    // das Pointer-Capture verliert!
+    if (d.kind.startsWith("draft")) {
+      svgRef.current?.setPointerCapture?.(e.pointerId);
+    } else {
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    }
   };
 
   /** Ausrichten an Nachbarn: liegt die gezogene Station fast auf einer Achse
@@ -452,9 +467,41 @@ export default function FloorPlan({
     if (!d) return;
     const [mx, my] = toMeter(e.clientX, e.clientY);
     if (d.kind === "draft") {
-      const p: [number, number] = [snap(mx), snap(my)];
+      let x = snap(mx);
+      let y = snap(my);
+      if (draft && draft.length >= 2 && !e.shiftKey) {
+        const alignTol = 8 * metersPerPx();
+        for (let k = 0; k < draft.length; k++) {
+          if (k === d.idx) continue;
+          if (Math.abs(x - draft[k][0]) < alignTol) x = draft[k][0];
+          if (Math.abs(y - draft[k][1]) < alignTol) y = draft[k][1];
+        }
+      }
+      const p: [number, number] = [x, y];
       onDraftMove?.(d.idx, p);
       setTip({ x: p[0], y: p[1] - 0.45, text: `${fmtNum(p[0])} · ${fmtNum(p[1])} m` });
+      return;
+    }
+    if (d.kind === "draft-indent") {
+      const carved = carveWallIndentation(d.base, d.edgeIdx, [mx, my], snapM);
+      if (carved) {
+        onDraftReplace?.(carved.points);
+        setTip({
+          x: snap(mx),
+          y: snap(my) - 0.5,
+          text: `Einbuchtung: ${fmtNum(carved.width)} × ${fmtNum(carved.depth)} m`,
+        });
+      }
+      return;
+    }
+    if (d.kind === "draft-edge") {
+      const moved = moveWallSegmentOrthogonal(d.base, d.edgeIdx, [mx, my], snapM);
+      onDraftReplace?.(moved);
+      setTip({
+        x: snap(mx),
+        y: snap(my) - 0.5,
+        text: `Wand verschieben (${fmtNum(snap(mx))} · ${fmtNum(snap(my))} m)`,
+      });
       return;
     }
     if (d.kind === "draft-body") {
@@ -556,6 +603,13 @@ export default function FloorPlan({
   // Zeigerposition für Gummiband und Rechteckvorschau.
   const [cursorState, setCursorState] = useState<{ x: number; y: number; shift: boolean } | null>(null);
 
+  // Einbuchtungs-Werkzeug auf geschlossenen Umrissen: Klick oder Ziehen auf einer Wand
+  // stanzt sofort eine rechtwinklige 4-Punkt-Einbuchtung in die Wand.
+  const [indentMode, setIndentMode] = useState(false);
+  useEffect(() => {
+    if (!polygonMode || !draftClosed) setIndentMode(false);
+  }, [polygonMode, draftClosed]);
+
   /** Zeigerposition mit allen Rastern: Fangweite, 90°-Winkelrast + Fluchtlinien auf
       vorhandene Eckpunkte, Magnet auf den Startpunkt (schließt das Polygon). */
   const displayCursor = useCallback((): [number, number] | null => {
@@ -566,17 +620,35 @@ export default function FloorPlan({
     const useOrtho = orthoLock ? !cursorState.shift : cursorState.shift;
     if (anchorPts?.length) {
       const p0 = anchorPts[0];
-      if (anchorPts.length >= 3 && Math.hypot(x - p0[0], y - p0[1]) < 16 * metersPerPx()) return p0;
+      if (anchorPts.length >= 3 && Math.hypot(x - p0[0], y - p0[1]) < 15 * metersPerPx()) return p0;
       const last = anchorPts[anchorPts.length - 1];
+      const alignTol = 9 * metersPerPx();
       if (useOrtho) {
-        if (Math.abs(x - last[0]) >= Math.abs(y - last[1])) y = last[1];
-        else x = last[0];
-      }
-      // Flucht-Magnet zu bestehenden Eckpunkten (z. B. 4. Ecke schließt Rechteck exakt zur 1. Ecke).
-      const alignTol = 10 * metersPerPx();
-      for (const pt of anchorPts) {
-        if (Math.abs(x - pt[0]) < alignTol) x = pt[0];
-        if (Math.abs(y - pt[1]) < alignTol) y = pt[1];
+        const horiz = Math.abs(x - last[0]) >= Math.abs(y - last[1]);
+        if (horiz) {
+          y = last[1];
+          // Nur X auf bestehende Ecken einrasten (niemals auf last[0] selbst, sonst Länge 0!).
+          for (const pt of anchorPts) {
+            if (Math.abs(pt[0] - last[0]) >= snapM && Math.abs(x - pt[0]) < alignTol) {
+              x = pt[0];
+              break;
+            }
+          }
+        } else {
+          x = last[0];
+          // Nur Y auf bestehende Ecken einrasten (niemals auf last[1] selbst!).
+          for (const pt of anchorPts) {
+            if (Math.abs(pt[1] - last[1]) >= snapM && Math.abs(y - pt[1]) < alignTol) {
+              y = pt[1];
+              break;
+            }
+          }
+        }
+      } else {
+        for (const pt of anchorPts) {
+          if (Math.abs(x - pt[0]) < alignTol && Math.abs(pt[0] - last[0]) >= snapM) x = pt[0];
+          if (Math.abs(y - pt[1]) < alignTol && Math.abs(pt[1] - last[1]) >= snapM) y = pt[1];
+        }
       }
     }
     if (aisleMode && useOrtho && aisleAnchor != null) {
@@ -587,7 +659,7 @@ export default function FloorPlan({
       }
     }
     return [x, y];
-  }, [cursorState, snap, polygonMode, draft, metersPerPx, aisleMode, aisleAnchor, floor.aisles, orthoLock]);
+  }, [cursorState, snap, snapM, polygonMode, draft, metersPerPx, aisleMode, aisleAnchor, floor.aisles, orthoLock]);
 
   const onBgPointerMove = (e: React.PointerEvent) => {
     if (dragRef.current) { applyDrag(e); return; }
@@ -730,7 +802,12 @@ export default function FloorPlan({
     // Magnet: nah am Startpunkt → Polygon gilt als geschlossen.
     if (draft && draft.length >= 3) {
       const p0 = draft[0];
-      if (Math.hypot(mx - p0[0], my - p0[1]) < 14 * metersPerPx()) { onDraftFinish?.(); return; }
+      if (Math.hypot(mx - p0[0], my - p0[1]) < 15 * metersPerPx()) { onDraftFinish?.(); return; }
+    }
+    // Keinen doppelten Punkt exakt auf den letzten Punkt setzen.
+    if (draft && draft.length >= 1) {
+      const prev = draft[draft.length - 1];
+      if (Math.hypot(shown[0] - prev[0], shown[1] - prev[1]) < 0.05) return;
     }
     onDraftPoint(shown);
   };
@@ -793,6 +870,12 @@ export default function FloorPlan({
 
   const shown = stations.filter((s) => (hideInactive ? s.active : true));
   const outline = floor.outline?.length ? floor.outline : [];
+  const floorHolePolys = useMemo(
+    () => (floor.obstacles ?? [])
+      .filter((o, idx) => idx !== editingObstacleIdx && isFloorHoleObstacle(o) && (o.points?.length ?? 0) >= 3)
+      .map((o) => o.points),
+    [floor.obstacles, editingObstacleIdx],
+  );
   const [mapStyle, setMapStyle] = useMapStyle();
   // Nur so viele Kacheln, wie die Bühne zeigt; gerundet, damit Ziehen nicht jede Kachel neu setzt.
   const mapReach = map ? Math.ceil((Math.hypot(view.x + view.w / 2, view.y + view.h / 2) + Math.hypot(view.w, view.h) / 2 + 20) / 50) * 50 : 0;
@@ -835,8 +918,9 @@ export default function FloorPlan({
     : rectMode ? "Rechteck: aufziehen (Klicken & Ziehen) oder zwei Ecken anklicken · Mausrad zoomt · Leertaste+Ziehen verschiebt."
     : aisleMode ? "Gang: Klick auf oder nahe einer Maschine setzt den Knoten auf ihre Mitte · Klick auf Knoten hängt an · 90°-Rast aktiv · Rechtsklick teilt/löscht."
     : doorMode ? "Zugang: Klick rastet an der nächsten Wand ein (Alt = frei) · Ziehen verschiebt ihn."
-    : polygonMode && draftClosed ? "Eckpunkte ziehen formt um · Mittelpunkt (+) auf einer Wand ziehen teilt & zieht eine Ecke heraus · Fläche ziehen verschiebt · Enter übernimmt."
-    : polygonMode ? "Klick setzt Ecke (90°-Rast aktiv, Umschalt = frei) · Klick auf Startpunkt oder Enter schließt & übernimmt · Rücktaste löscht letzten Punkt."
+    : polygonMode && draftClosed && indentMode ? "Einbuchtung aktiv: Klick oder Ziehen auf einer Wand stanzt sofort eine 90°-Einbuchtung · Wandkante ziehen passt Tiefe an."
+    : polygonMode && draftClosed ? "Ecken ziehen · Wandkante ziehen verschiebt Wand · [⊔]-Griff auf Wand zieht 90°-Einbuchtung · (+)-Griff teilt Wand · Enter übernimmt."
+    : polygonMode ? "Offener Linienzug: Klick setzt nächste Wand-Ecke (90°-Rast aktiv, Umschalt = frei) · Einbuchtungen frei nach innen zeichnen · Klick auf Startpunkt (grün) oder Enter schließt."
     : movable ? "Klick wählt Station, Wand, Zone oder Tür · Ziehen verschiebt · Eckpunkte skalieren · Kreis dreht · Mausrad zoomt."
     : "Mausrad zoomt · Ziehen schiebt · Klick oder Enter auf Station öffnet sie.";
 
@@ -863,13 +947,33 @@ export default function FloorPlan({
               onClick={() => setOrthoLock((v) => !v)}
             />
           )}
+          {polygonMode && draftClosed && (draft?.length ?? 0) >= 3 && onDraftReplace && (
+            <Button
+              small
+              minimal={!indentMode}
+              intent={indentMode ? "warning" : "none"}
+              icon="insert"
+              text="Einbuchtung (⊔)"
+              title="Auf eine Wand klicken oder ziehen, um eine rechtwinklige 90°-Einbuchtung / Ausbuchtung einzufügen"
+              onClick={() => setIndentMode((v) => !v)}
+            />
+          )}
+          {polygonMode && draftClosed && (draft?.length ?? 0) >= 3 && onDraftReopen && (
+            <Button
+              small
+              icon="edit"
+              text="Weiterzeichnen"
+              title="Geschlossenen Umriss wieder öffnen, um weitere Punkte & Einbuchtungen frei anzuhängen"
+              onClick={() => { setIndentMode(false); onDraftReopen(); }}
+            />
+          )}
           {polygonMode && draftClosed && onDraftStartNew && (
             <Button
               small
               icon="polygon-filter"
               text="Neu zeichnen"
-              title="Aktuellen Entwurf leeren und Punkt für Punkt frei neu zeichnen"
-              onClick={onDraftStartNew}
+              title="Aktuellen Entwurf leeren und Punkt für Punkt als offenen Linienzug neu zeichnen"
+              onClick={() => { setIndentMode(false); onDraftStartNew(); }}
             />
           )}
           {polygonMode && !draftClosed && (draft?.length ?? 0) > 0 && onDraftDelete && (
@@ -886,8 +990,8 @@ export default function FloorPlan({
               small
               intent="primary"
               icon="tick"
-              text="Übernehmen (Enter)"
-              title="Gezeichnetes Polygon abschließen und übernehmen"
+              text={draftClosed ? "Übernehmen (Enter)" : "Schließen & Übernehmen (Enter)"}
+              title="Gezeichneten Umriss schließen und übernehmen"
               onClick={onDraftFinish}
             />
           )}
@@ -934,7 +1038,14 @@ export default function FloorPlan({
               ))}
             </g>
           )}
-          {outline.length > 0 && <path d={outlinePath(outline)} fill={bg} fillOpacity={mapTiles.length ? 0.55 : 1} />}
+          {outline.length > 0 && (
+            <path
+              d={outlineWithHolesPath(outline, floorHolePolys)}
+              fillRule="evenodd"
+              fill={bg}
+              fillOpacity={mapTiles.length ? 0.55 : 1}
+            />
+          )}
 
           {/* Meter-Raster. */}
           <g>
@@ -1203,40 +1314,58 @@ export default function FloorPlan({
             </g>
           )}
 
-          {/* Polygon-Entwurf: Fläche, Kantenmaße, Gummiband, Mittelpunkte (+), Eckpunkte. */}
+          {/* Polygon-Entwurf:
+              - Solange !draftClosed (offenes Zeichnen): OFFENER Linienzug (openOutlinePath) ohne Schlusslinie
+                vom letzten zum ersten Punkt und ohne Body-PointerEvents, damit Klicks für Einbuchtungen
+                ins Innere niemals blockiert werden!
+              - Sobald draftClosed: Geschlossenes Polygon mit Wand-Schieben, [⊔]-Einbuchtungs-Griffen,
+                (+)-Wandteilern und Eckgriffen. */}
           {polygonMode && draft && draft.length > 0 && (() => {
-            // Bildschirmproportionale Griffe — bleiben auch bei 60×40 m Hallen jederzeit greifbar!
             const hitHalf = Math.max(0.18, fs(13));
             const visHalf = Math.max(0.11, fs(5.5));
-            const midR = Math.max(0.09, fs(4.5));
-            const canDragBody = draft.length >= 3 && !!onDraftReplace;
+            const midR = Math.max(0.09, fs(4.8));
+            // Nur geschlossene Zonen/Hindernisse lassen sich über die Innenfläche verschieben —
+            // beim Hallenumriss oder während des offenen Zeichnens (!draftClosed) bleibt das Innere frei für Klicks!
+            const canDragBody = draftClosed && draft.length >= 3 && !!onDraftReplace && layer !== "outline" && !indentMode;
             const alignLines = !draftClosed && cursor
               ? draft.filter((pt) => Math.abs(pt[0] - cursor[0]) < 1e-6 || Math.abs(pt[1] - cursor[1]) < 1e-6)
               : [];
             return (
             <>
-              <path d={outlinePath(draft)} fill={draftColour} fillOpacity={draftClosed ? 0.14 : 0.09} stroke={draftColour}
-                strokeWidth={2.2} strokeDasharray="6 4" vectorEffect="non-scaling-stroke"
-                strokeLinejoin="round"
-                className={canDragBody ? "floor-draft-body" : undefined}
-                pointerEvents={canDragBody ? "all" : "none"}
-                style={canDragBody ? { cursor: "move" } : undefined}
-                onPointerDown={canDragBody ? (e) => {
-                  if (e.button !== 0 || dragRef.current || spaceDownRef.current) return;
-                  const [mx, my] = toMeter(e.clientX, e.clientY);
-                  beginDrag(e, { kind: "draft-body", start: [mx, my], base: draft.map((q) => [q[0], q[1]] as [number, number]) });
-                } : undefined}
-                onClick={canDragBody ? (e) => { e.stopPropagation(); } : undefined} />
-              {/* Flucht-Hilfslinien beim Zeichnen */}
+              {draftClosed ? (
+                <path d={outlinePath(draft)} fill={draftColour} fillOpacity={0.14} stroke={draftColour}
+                  strokeWidth={2.2} strokeDasharray="6 4" vectorEffect="non-scaling-stroke"
+                  strokeLinejoin="round"
+                  className={canDragBody ? "floor-draft-body" : undefined}
+                  pointerEvents={canDragBody ? "all" : "none"}
+                  style={canDragBody ? { cursor: "move" } : undefined}
+                  onPointerDown={canDragBody ? (e) => {
+                    if (e.button !== 0 || dragRef.current || spaceDownRef.current) return;
+                    const [mx, my] = toMeter(e.clientX, e.clientY);
+                    beginDrag(e, { kind: "draft-body", start: [mx, my], base: draft.map((q) => [q[0], q[1]] as [number, number]) });
+                  } : undefined}
+                  onClick={canDragBody ? (e) => { e.stopPropagation(); } : undefined} />
+              ) : (
+                <>
+                  {/* Vorschau-Füllung nur zeigen, wenn der Zeiger magnetisch auf dem Startpunkt (1) zum Schließen einrastet */}
+                  {magnet && draft.length >= 3 && (
+                    <path d={outlinePath(draft)} fill="var(--g-floor-snap)" fillOpacity={0.12} stroke="none" pointerEvents="none" />
+                  )}
+                  <path d={openOutlinePath(draft)} fill="none" stroke={draftColour}
+                    strokeWidth={2.5} vectorEffect="non-scaling-stroke"
+                    strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" />
+                </>
+              )}
+              {/* Flucht-Hilfslinien beim offenen Zeichnen */}
               {!draftClosed && cursor && alignLines.map((pt, idx) => (
                 <line key={`al-${idx}`} x1={pt[0]} y1={pt[1]} x2={cursor[0]} y2={cursor[1]}
                   stroke="#38bdf8" strokeWidth={1.2} strokeDasharray="3 3"
                   vectorEffect="non-scaling-stroke" pointerEvents="none" />
               ))}
-              {/* Kantenmaße */}
+              {/* Kantenmaße — beim offenen Zeichnen (!draftClosed) NIEMALS eine Kante vom letzten zum ersten Punkt bemaßen! */}
               {vis.labels && draft.map((p, i) => {
+                if (!draftClosed && i === draft.length - 1) return null;
                 const q = draft[(i + 1) % draft.length];
-                if (draft.length < 3 && i === draft.length - 1) return null;
                 const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
                 if (len < 0.2) return null;
                 return (
@@ -1246,37 +1375,98 @@ export default function FloorPlan({
                     pointerEvents="none">{fmtNum(len)} m</text>
                 );
               })}
-              {/* Kanten als Doppelklick-Ziel + ziehbare Kanten-Mittelpunkte (+) */}
-              {onDraftInsert && draft.length >= 2 && draft.map((p, i) => {
-                const q = draft[(i + 1) % draft.length];
+              {/* Wandkanten:
+                  - Im Einbuchtungs-Modus (oder mit Umschalt+Ziehen) stanzt Ziehen/Klicken auf jede Wand eine 90°-Einbuchtung.
+                  - Normal zieht man eine geschlossene Wandkante parallel (Orthogonal-Wandverschiebung),
+                  - [⊔]-Griff stanzt eine 90°-Einbuchtung, (+)-Griff teilt die Wand mit einer neuen Ecke. */}
+              {(onDraftInsert || onDraftReplace) && draft.length >= 2 && draft.map((p, i) => {
                 if (!draftClosed && i === draft.length - 1) return null;
-                const mx = snap((p[0] + q[0]) / 2);
-                const my = snap((p[1] + q[1]) / 2);
-                const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+                const q = draft[(i + 1) % draft.length];
+                const vx = q[0] - p[0];
+                const vy = q[1] - p[1];
+                const len = Math.hypot(vx, vy);
+                if (len < 0.1) return null;
+                const tx = vx / len;
+                const ty = vy / len;
+                const mx = (p[0] + q[0]) / 2;
+                const my = (p[1] + q[1]) / 2;
+                const offset = Math.min(len * 0.18, Math.max(0.45, fs(15)));
+                const plusX = mx - tx * offset;
+                const plusY = my - ty * offset;
+                const indentX = mx + tx * offset;
+                const indentY = my + ty * offset;
                 return (
                   <g key={`edge-${i}`}>
-                    <line x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]}
-                      stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke"
-                      style={{ cursor: "copy" }}
+                    <line
+                      className="floor-draft-hit"
+                      x1={p[0]} y1={p[1]} x2={q[0]} y2={q[1]}
+                      stroke="transparent" strokeWidth={14} vectorEffect="non-scaling-stroke"
+                      style={{ cursor: indentMode ? "crosshair" : draftClosed ? "grab" : "copy" }}
+                      onPointerDown={(e) => {
+                        if (!draftClosed || !onDraftReplace || e.button !== 0 || dragRef.current || spaceDownRef.current) return;
+                        e.stopPropagation();
+                        const base = draft.map((pt) => [pt[0], pt[1]] as [number, number]);
+                        if (indentMode || e.shiftKey) {
+                          const [cx, cy] = toMeter(e.clientX, e.clientY);
+                          const carved = carveWallIndentation(base, i, [cx, cy], snapM);
+                          if (carved) onDraftReplace(carved.points);
+                          beginDrag(e, { kind: "draft-indent", edgeIdx: i, base });
+                        } else {
+                          beginDrag(e, { kind: "draft-edge", edgeIdx: i, base });
+                        }
+                      }}
+                      onClick={(e) => { e.stopPropagation(); }}
                       onDoubleClick={(e) => {
+                        if (!onDraftInsert) return;
                         e.stopPropagation();
                         const [cx, cy] = toMeter(e.clientX, e.clientY);
                         onDraftInsert(i, [snap(cx), snap(cy)]);
                       }} />
-                    {draftClosed && len >= 1.5 && (
+                    {draftClosed && len >= 1.5 && onDraftInsert && (
                       <g className="floor-draft-hit"
                          style={{ cursor: "copy" }}
                          onPointerDown={(e) => {
                            if (e.button !== 0 || dragRef.current) return;
                            e.stopPropagation();
-                           onDraftInsert(i, [mx, my]);
+                           const pt: [number, number] = [snap(plusX), snap(plusY)];
+                           onDraftInsert(i, pt);
                            beginDrag(e, { kind: "draft", idx: i + 1 });
                            onDraftMoveStart?.(i + 1);
                          }}
                          onClick={(e) => { e.stopPropagation(); }}>
-                        <title>Wand teilen &amp; neue Ecke herausziehen</title>
-                        <circle cx={mx} cy={my} r={hitHalf * 0.75} fill="transparent" />
-                        <circle cx={mx} cy={my} r={midR} fill="var(--g-surface)" stroke={draftColour} strokeWidth={midR * 0.35} pointerEvents="none" />
+                        <title>Ecke auf dieser Wand einfügen &amp; ziehen (+)</title>
+                        <circle cx={plusX} cy={plusY} r={hitHalf * 0.72} fill="transparent" />
+                        <circle cx={plusX} cy={plusY} r={midR} fill="var(--g-surface)" stroke={draftColour} strokeWidth={midR * 0.32} pointerEvents="none" />
+                        <line x1={plusX - midR * 0.5} y1={plusY} x2={plusX + midR * 0.5} y2={plusY} stroke={draftColour} strokeWidth={midR * 0.28} pointerEvents="none" />
+                        <line x1={plusX} y1={plusY - midR * 0.5} x2={plusX} y2={plusY + midR * 0.5} stroke={draftColour} strokeWidth={midR * 0.28} pointerEvents="none" />
+                      </g>
+                    )}
+                    {draftClosed && len >= 2.0 && onDraftReplace && (
+                      <g className="floor-draft-hit"
+                         style={{ cursor: "pointer" }}
+                         onPointerDown={(e) => {
+                           if (e.button !== 0 || dragRef.current) return;
+                           e.stopPropagation();
+                           const base = draft.map((pt) => [pt[0], pt[1]] as [number, number]);
+                           const [cx, cy] = toMeter(e.clientX, e.clientY);
+                           const carved = carveWallIndentation(base, i, [cx, cy], snapM);
+                           if (carved) onDraftReplace(carved.points);
+                           beginDrag(e, { kind: "draft-indent", edgeIdx: i, base });
+                         }}
+                         onClick={(e) => { e.stopPropagation(); }}>
+                        <title>90°-Einbuchtung / Ausbuchtung in diese Wand ziehen (⊔)</title>
+                        <circle cx={indentX} cy={indentY} r={hitHalf * 0.78} fill="transparent" />
+                        <rect x={indentX - midR * 1.05} y={indentY - midR * 1.05} width={midR * 2.1} height={midR * 2.1} rx={midR * 0.35}
+                          fill={indentMode ? "#f59e0b" : "var(--g-surface)"} stroke="#f59e0b" strokeWidth={midR * 0.34} pointerEvents="none" />
+                        <path
+                          d={`M ${indentX - midR * 0.55} ${indentY - midR * 0.45} L ${indentX - midR * 0.55} ${indentY + midR * 0.45} L ${indentX + midR * 0.55} ${indentY + midR * 0.45} L ${indentX + midR * 0.55} ${indentY - midR * 0.45}`}
+                          fill="none"
+                          stroke={indentMode ? "#0f1216" : "#f59e0b"}
+                          strokeWidth={midR * 0.3}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          pointerEvents="none"
+                        />
                       </g>
                     )}
                   </g>
@@ -1285,17 +1475,12 @@ export default function FloorPlan({
               {!draftClosed && cursor && lastDraft && (
                 <g pointerEvents="none">
                   <line x1={lastDraft[0]} y1={lastDraft[1]} x2={cursor[0]} y2={cursor[1]}
-                    stroke={magnet ? "var(--g-floor-snap)" : draftColour} strokeWidth={2} strokeDasharray="5 3"
+                    stroke={magnet ? "var(--g-floor-snap)" : draftColour} strokeWidth={2.2} strokeDasharray="5 3"
                     vectorEffect="non-scaling-stroke" />
-                  {draft.length >= 2 && !magnet && (
-                    <line x1={cursor[0]} y1={cursor[1]} x2={draft[0][0]} y2={draft[0][1]}
-                      stroke={draftColour} strokeWidth={1} strokeDasharray="2 4" opacity={0.5}
-                      vectorEffect="non-scaling-stroke" />
-                  )}
                   <text className="floor-measure" textAnchor="middle"
                     x={(lastDraft[0] + cursor[0]) / 2} y={(lastDraft[1] + cursor[1]) / 2 - fs(10)}
                     fontSize={fs(12)} style={{ strokeWidth: fs(2.5) }}>
-                    {magnet ? "● Klick schließt Polygon"
+                    {magnet ? "● Klick auf Startpunkt (1) schließt Umriss"
                       : `${fmtNum(Math.hypot(cursor[0] - lastDraft[0], cursor[1] - lastDraft[1]))} m · `
                         + `${Math.round(((Math.atan2(cursor[1] - lastDraft[1], cursor[0] - lastDraft[0]) * 180) / Math.PI + 360) % 360)}°`}
                   </text>
@@ -1697,40 +1882,57 @@ function ObstacleShape({ obstacle, labels, size, onPick }: {
   if ((obstacle.points?.length ?? 0) < 3) return null;
   const c = polygonCentroid(obstacle.points);
   const kind = obstacleKind(obstacle);
+  const isHole = kind === "bore" || kind === "cutout";
+  const circleInfo = kind === "bore" ? circleDimensions(obstacle.points) : null;
   const fill =
-    kind === "wall" || kind === "column" || kind === "round_column" ? "var(--g-text-2)"
+    isHole ? "var(--g-floor-outside)"
+    : kind === "wall" || kind === "column" || kind === "round_column" ? "var(--g-text-2)"
     : kind === "room" ? "var(--g-surface-2)"
     : kind === "partition" ? "var(--g-muted)"
     : kind === "rack_block" ? "var(--g-floor-aisle-lane)"
     : kind === "fence" ? "none"
     : "url(#floor-hatch)";
   const fillOpacity =
-    kind === "wall" || kind === "column" || kind === "round_column" ? 0.72
+    isHole ? 0.92
+    : kind === "wall" || kind === "column" || kind === "round_column" ? 0.72
     : kind === "room" ? 0.78
     : kind === "partition" ? 0.52
     : kind === "rack_block" ? 0.7
     : 1;
   const stroke =
-    kind === "fence" ? "var(--g-floor-warn)"
+    isHole ? "var(--gimel-accent)"
+    : kind === "fence" ? "var(--g-floor-warn)"
     : kind === "room" ? "var(--g-text-strong)"
     : kind === "wall" || kind === "column" || kind === "round_column" ? "var(--g-text-strong)"
     : "var(--g-muted)";
-  const strokeWidth = kind === "wall" || kind === "room" ? 2 : 1.4;
+  const strokeWidth = isHole ? 2.2 : kind === "wall" || kind === "room" ? 2 : 1.4;
+  const chR = circleInfo ? Math.max(0.2, circleInfo.diameter * 0.25) : 0.35;
+  const labelText = circleInfo
+    ? `${obstacle.name || "Bohrung"} (Ø ${fmtNum(circleInfo.diameter)} m)`
+    : obstacle.name;
   return (
     <g className={"floor-obstacle" + (onPick ? " floor-pickable" : "")} data-kind={kind}
       pointerEvents={onPick ? "auto" : "none"}
       style={onPick ? { cursor: "pointer" } : undefined}
       onClick={onPick ? (e) => { e.stopPropagation(); onPick(); } : undefined}>
-      {onPick && <title>{obstacle.name || "Hindernis"} — Klick zum Bearbeiten</title>}
+      {onPick && <title>{labelText || "Hindernis"} — Klick zum Bearbeiten</title>}
       <path d={outlinePath(obstacle.points)} fill={fill} fillOpacity={fillOpacity}
         stroke={stroke} strokeWidth={strokeWidth}
-        strokeDasharray={kind === "fence" ? "5 3" : undefined}
+        strokeDasharray={kind === "fence" ? "5 3" : isHole ? "6 3" : undefined}
         vectorEffect="non-scaling-stroke" />
-      {labels && obstacle.name && size != null && (
+      {isHole && (
+        <g pointerEvents="none" opacity={0.65}>
+          <line x1={c[0] - chR} y1={c[1]} x2={c[0] + chR} y2={c[1]}
+            stroke="var(--gimel-accent)" strokeWidth={1.2} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />
+          <line x1={c[0]} y1={c[1] - chR} x2={c[0]} y2={c[1] + chR}
+            stroke="var(--gimel-accent)" strokeWidth={1.2} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />
+        </g>
+      )}
+      {labels && labelText && size != null && (
         <text x={c[0]} y={c[1]} textAnchor="middle" dominantBaseline="central" fontSize={size}
-          fill={kind === "room" ? "var(--g-text-strong)" : "var(--g-muted)"}
+          fill={isHole ? "var(--gimel-accent)" : kind === "room" ? "var(--g-text-strong)" : "var(--g-muted)"}
           className="twin-map-text" pointerEvents="none">
-          {obstacle.name}
+          {labelText}
         </text>
       )}
     </g>

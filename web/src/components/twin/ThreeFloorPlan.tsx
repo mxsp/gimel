@@ -6,7 +6,7 @@ import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRe
 import { Line2 } from "three/examples/jsm/lines/Line2.js";
 import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
-import { Floor, FlowEdge, Robot, RobotJob, Station, doorDirection, effectiveDoorKind, obstacleHeight, obstacleKind, routePoints, sceneBounds, stationCorners } from "../../factory";
+import { Floor, FlowEdge, Robot, RobotJob, Station, doorDirection, effectiveDoorKind, isFloorHoleObstacle, obstacleHeight, obstacleKind, routePoints, sceneBounds, stationCorners } from "../../factory";
 import { mapAttribution, mapDetailFor, tileMetres, tilesAround, useMapStyle } from "../../sites";
 import MapStyleSwitch from "../MapStyleSwitch";
 import TwinSky from "./Sky";
@@ -235,7 +235,8 @@ function buildFloorPresentation(
   const hallH = hallHeight(floor);
   const alpha = opts.full ? 0.92 : 0.66;
   const links = verticalLinks(floor, stations);
-  const holes = stairWellHoles(links);
+  const boreHoles = (floor.obstacles ?? []).filter((o) => isFloorHoleObstacle(o) && (o.points?.length ?? 0) >= 3).map((o) => o.points);
+  const holes = [...stairWellHoles(links), ...boreHoles];
 
   const floorMesh = new THREE.Mesh(
     floorGeometry(outline, holes),
@@ -2057,7 +2058,8 @@ function ThreeFloorPlan({
     apron.renderOrder = -2;
     root.add(apron);
 
-    const stairHoles = stairWellHoles(links);
+    const boreHoles = (floor.obstacles ?? []).filter((o) => isFloorHoleObstacle(o) && (o.points?.length ?? 0) >= 3).map((o) => o.points);
+    const stairHoles = [...stairWellHoles(links), ...boreHoles];
     const floorGeo = floorGeometry(floor.outline ?? [], stairHoles);
     const floorMesh = new THREE.Mesh(floorGeo, new THREE.MeshBasicMaterial({
       color: hallColor, side: THREE.DoubleSide,
@@ -2232,6 +2234,15 @@ function ThreeFloorPlan({
       const ceiling = Math.max(3, Number(floor.height_m) || 6);
       for (const o of floor.obstacles ?? []) {
         if (!o.points || o.points.length < 3) continue;
+        if (isFloorHoleObstacle(o)) {
+          // Bodenbohrung / Aussparung: nur eine flache Sicherheitskante um das Loch zeichnen.
+          const rimPts = o.points.map(([x, y]) => new THREE.Vector3(x, 0.03, y));
+          root.add(new THREE.LineLoop(
+            new THREE.BufferGeometry().setFromPoints(rimPts),
+            new THREE.LineBasicMaterial({ color: new THREE.Color(css("--gimel-accent", "#0b7a67")), transparent: true, opacity: 0.9 }),
+          ));
+          continue;
+        }
         const h = obstacleHeight(o, ceiling);
         const kind = obstacleKind(o);
         const solid = kind === "wall" || kind === "room" || kind === "column" || kind === "round_column";

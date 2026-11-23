@@ -191,6 +191,8 @@ export function snapDoorToWall(
 export function obstacleKind(o: Pick<Obstacle, "name" | "kind">): string {
   if (o.kind) return o.kind;
   const name = (o.name || "").toLowerCase();
+  if (name.includes("bohrung") || name.includes("durchbruch") || name.includes("rundloch")) return "bore";
+  if (name.includes("aussparung") || name.includes("schacht") || name.includes("innenhof") || name.includes("loch")) return "cutout";
   if (name.includes("rundstütz") || name.includes("rundstutz")) return "round_column";
   if (name.includes("stütz") || name.includes("stutz") || name.includes("pfeiler") || name.includes("säule")) return "column";
   if (name.includes("trenn")) return "partition";
@@ -199,6 +201,12 @@ export function obstacleKind(o: Pick<Obstacle, "name" | "kind">): string {
   if (name.includes("zaun") || name.includes("geländer") || name.includes("gelaender") || name.includes("schutz")) return "fence";
   if (name.includes("regal")) return "rack_block";
   return "obstacle";
+}
+
+/** Ist ein Bauteil eine Bodenbohrung / Aussparung (Loch im Hallenboden)? */
+export function isFloorHoleObstacle(o: Pick<Obstacle, "name" | "kind">): boolean {
+  const k = obstacleKind(o);
+  return k === "bore" || k === "cutout";
 }
 
 /** Einheitliche Höhe eines Hindernisses/Bauteils für Semi-3D und 3D (in Metern). */
@@ -813,6 +821,8 @@ export interface StructuralPreset {
 /** Vorgefertigte Bauteile für den Hallen-Designer (werden als Hindernis-Polygone
  *  mit sprechendem Namen angelegt — 2D, 3D, Kollision und Pfadfinder verstehen sie sofort). */
 export const STRUCTURAL_PRESETS: StructuralPreset[] = [
+  { id: "bore", label: "Bohrung", name: "Bohrung", hint: "Runde Bodenbohrung / Deckendurchbruch (Ø 2,0 m, frei skalierbar)", icon: "ring", w: 2.0, d: 2.0, shape: "circle" },
+  { id: "cutout", label: "Aussparung", name: "Aussparung", hint: "Rechteckige Bodenöffnung / Schacht / Innenhof (3 × 2 m)", icon: "widget", w: 3.0, d: 2.0, shape: "rect" },
   { id: "wall", label: "Innenwand", name: "Wand", hint: "Raumhohe Innenwand (6 × 0,25 m)", icon: "minus", w: 6.0, d: 0.25, shape: "rect" },
   { id: "partition", label: "Trennwand", name: "Trennwand", hint: "Halbhohe Trennwand 2,2 m (4 × 0,2 m)", icon: "split-columns", w: 4.0, d: 0.2, shape: "rect" },
   { id: "column", label: "Stütze", name: "Stütze", hint: "Raumhohe Hallenstütze (0,45 × 0,45 m)", icon: "stop", w: 0.45, d: 0.45, shape: "rect" },
@@ -822,15 +832,110 @@ export const STRUCTURAL_PRESETS: StructuralPreset[] = [
   { id: "rack_block", label: "Regalblock", name: "Regalblock", hint: "Lager- / Trennregal 2,35 m (4 × 1,2 m)", icon: "layers", w: 4.0, d: 1.2, shape: "rect" },
 ];
 
+/** Erzeugt ein Kreis-Polygon (z. B. für Bohrungen oder Rundstützen) um ``[cx, cy]``. */
+export function buildCirclePolygon(cx: number, cy: number, diameter: number, segments = 24): [number, number][] {
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const rad = Math.max(0.05, diameter / 2);
+  return Array.from({ length: segments }, (_, i) => {
+    const a = (i / segments) * Math.PI * 2;
+    return [r2(cx + Math.cos(a) * rad), r2(cy + Math.sin(a) * rad)];
+  });
+}
+
+/** Erkennt ein Kreis-Polygon (ab 8 Punkten) und liefert Durchmesser und Mittelpunkt. */
+export function circleDimensions(pts: [number, number][]): { diameter: number; cx: number; cy: number } | null {
+  if (pts.length < 8) return null;
+  const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+  const cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  const dists = pts.map((p) => Math.hypot(p[0] - cx, p[1] - cy));
+  const avgR = dists.reduce((a, r) => a + r, 0) / dists.length;
+  if (avgR < 0.05) return null;
+  const maxDev = Math.max(...dists.map((r) => Math.abs(r - avgR)));
+  if (maxDev > Math.max(0.06, avgR * 0.12)) return null;
+  return {
+    diameter: Math.round(avgR * 2 * 100) / 100,
+    cx: Math.round(cx * 100) / 100,
+    cy: Math.round(cy * 100) / 100,
+  };
+}
+
+/** Skaliert ein Kreis-Polygon (Bohrung / Rundstütze) um seine Mitte auf ``newDiameter``. */
+export function resizeCirclePolygon(pts: [number, number][], newDiameter: number): [number, number][] {
+  const info = circleDimensions(pts);
+  if (!info) return pts;
+  return buildCirclePolygon(info.cx, info.cy, Math.max(0.1, newDiameter), Math.max(16, pts.length));
+}
+
+/** Erzeugt eine rechtwinklige Einbuchtung (oder Ausbuchtung) in der Wandkante ``edgeIdx`` eines geschlossenen Umrisses. */
+export function carveWallIndentation(
+  pts: [number, number][],
+  edgeIdx: number,
+  targetPt: [number, number],
+  snapStep = 0.25,
+  fixedWidth?: number,
+): { points: [number, number][]; width: number; depth: number } | null {
+  if (pts.length < 3 || edgeIdx < 0 || edgeIdx >= pts.length) return null;
+  const p = pts[edgeIdx];
+  const q = pts[(edgeIdx + 1) % pts.length];
+  const vx = q[0] - p[0];
+  const vy = q[1] - p[1];
+  const len = Math.hypot(vx, vy);
+  const step = Math.max(0.05, snapStep || 0.25);
+  if (len < step * 3) return null;
+
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const snapV = (v: number) => r2(Math.round(v / step) * step);
+  const tx = vx / len;
+  const ty = vy / len;
+  const nx = -ty;
+  const ny = tx;
+
+  const relX = targetPt[0] - p[0];
+  const relY = targetPt[1] - p[1];
+  const rawAlong = relX * tx + relY * ty;
+  let depth = snapV(relX * nx + relY * ny);
+
+  // Falls nur geklickt (Tiefe ~ 0): automatisch nach innen in die Halle einbuchten!
+  if (Math.abs(depth) < step) {
+    const midX = (p[0] + q[0]) / 2;
+    const midY = (p[1] + q[1]) / 2;
+    const testIn: [number, number] = [midX + nx * 0.5, midY + ny * 0.5];
+    const sign = pointInPolygon(testIn, pts) ? 1 : -1;
+    const autoD = Math.max(step * 2, Math.min(6, snapV(len * 0.25)));
+    depth = sign * autoD;
+  }
+
+  const maxW = Math.max(step, len - step * 2);
+  const w = Math.min(
+    maxW,
+    Math.max(step * 2, fixedWidth ? snapV(fixedWidth) : snapV(Math.min(10, Math.max(2, len * 0.35)))),
+  );
+  const halfW = w / 2;
+  const centerAlong = Math.max(step + halfW, Math.min(len - step - halfW, snapV(rawAlong)));
+  const t0 = r2(centerAlong - halfW);
+  const t1 = r2(centerAlong + halfW);
+
+  const a1: [number, number] = [r2(p[0] + tx * t0), r2(p[1] + ty * t0)];
+  const a2: [number, number] = [r2(a1[0] + nx * depth), r2(a1[1] + ny * depth)];
+  const b2: [number, number] = [r2(p[0] + tx * t1 + nx * depth), r2(p[1] + ty * t1 + ny * depth)];
+  const b1: [number, number] = [r2(p[0] + tx * t1), r2(p[1] + ty * t1)];
+
+  const next = [
+    ...pts.slice(0, edgeIdx + 1),
+    a1,
+    a2,
+    b2,
+    b1,
+    ...pts.slice(edgeIdx + 1),
+  ];
+  return { points: next, width: r2(t1 - t0), depth: r2(Math.abs(depth)) };
+}
+
 /** Erzeugt ein Polygon um ``[cx, cy]`` für ein Bauteil aus ``STRUCTURAL_PRESETS``. */
 export function buildPresetPolygon(preset: StructuralPreset, cx: number, cy: number): [number, number][] {
   const r2 = (v: number) => Math.round(v * 100) / 100;
   if (preset.shape === "circle") {
-    const rad = preset.w / 2;
-    return Array.from({ length: 12 }, (_, i) => {
-      const a = (i / 12) * Math.PI * 2;
-      return [r2(cx + Math.cos(a) * rad), r2(cy + Math.sin(a) * rad)];
-    });
+    return buildCirclePolygon(cx, cy, preset.w, 24);
   }
   const hw = preset.w / 2;
   const hd = preset.d / 2;
@@ -972,6 +1077,51 @@ export function fmtMin(v: number): string {
 export function outlinePath(pts: [number, number][]): string {
   if (!pts.length) return "";
   return pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0]} ${p[1]}`).join(" ") + " Z";
+}
+
+/** Offener Linienzug (ohne Verbindung vom letzten zum ersten Punkt!) für das aktive Zeichnen. */
+export function openOutlinePath(pts: [number, number][]): string {
+  if (!pts.length) return "";
+  return pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0]} ${p[1]}`).join(" ");
+}
+
+/** Geschlossener Hallenumriss inklusive Bodenbohrungen / Aussparungen (für fillRule="evenodd"). */
+export function outlineWithHolesPath(outer: [number, number][], holes: [number, number][][] = []): string {
+  if (!outer.length) return "";
+  let d = outlinePath(outer);
+  for (const h of holes) {
+    if (h && h.length >= 3) d += " " + outlinePath(h);
+  }
+  return d;
+}
+
+/** Verschiebt eine komplette Wandkante ``edgeIdx`` (Beide Eckpunkte ``edgeIdx`` und ``edgeIdx+1``)
+ *  parallel entlang ihrer Normalen auf ``targetPt`` — ideal zum Nachziehen von Einbuchtungen. */
+export function moveWallSegmentOrthogonal(
+  pts: [number, number][],
+  edgeIdx: number,
+  targetPt: [number, number],
+  snapStep = 0.25,
+): [number, number][] {
+  const n = pts.length;
+  if (n < 3 || edgeIdx < 0 || edgeIdx >= n) return pts;
+  const i0 = edgeIdx;
+  const i1 = (edgeIdx + 1) % n;
+  const p = pts[i0];
+  const q = pts[i1];
+  const vx = q[0] - p[0];
+  const vy = q[1] - p[1];
+  const len = Math.hypot(vx, vy);
+  if (len < 1e-6) return pts;
+  const nx = -vy / len;
+  const ny = vx / len;
+  const step = Math.max(0.05, snapStep || 0.25);
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const snapV = (v: number) => r2(Math.round(v / step) * step);
+  const delta = snapV((targetPt[0] - p[0]) * nx + (targetPt[1] - p[1]) * ny);
+  const dx = r2(nx * delta);
+  const dy = r2(ny * delta);
+  return pts.map((pt, idx) => (idx === i0 || idx === i1 ? [r2(pt[0] + dx), r2(pt[1] + dy)] : pt));
 }
 
 /** Bounding-Box von Umriss, Zonen und Stationen — Basis für den fit-Zoom. */

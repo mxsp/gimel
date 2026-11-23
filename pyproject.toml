@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gimel"
-version = "0.3.0"
+version = "0.3.1"
 description = "Order and production management for manufacturers and job shops (in development, not released)"
 readme = "README.md"
 requires-python = ">=3.11"

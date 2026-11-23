@@ -5,7 +5,7 @@
 ; optional Private-LAN Windows Firewall rule, uninstaller, and zero terminal windows.
 
 #ifndef AppVersion
-  #define AppVersion "0.3.0"
+  #define AppVersion "0.3.1"
 #endif
 
 [Setup]

@@ -7,8 +7,8 @@ import { navigate } from "../router";
 import { toastError, toastInfo, toastSuccess } from "../toast";
 import FloorPlan from "../components/FloorPlan";
 import {
-  aisleAttach, aisleComponents, aisleStub, Aisles, buildPresetPolygon, cleanAisles, connectStation, effectiveDoorKind, manualAttach, ManualPath, Pathfinder,
-  polylineLength, proposeConnection, rectDimensions, resizeRectPolygon, rotatePolygon, simplifyPolyline, ALL_TYPES, BLANK_STATION, COLOUR_PALETTE, copyToClipboard, Door,
+  aisleAttach, aisleComponents, aisleStub, Aisles, buildPresetPolygon, circleDimensions, cleanAisles, connectStation, effectiveDoorKind, manualAttach, ManualPath, Pathfinder,
+  polylineLength, proposeConnection, rectDimensions, resizeCirclePolygon, resizeRectPolygon, rotatePolygon, simplifyPolyline, ALL_TYPES, BLANK_STATION, COLOUR_PALETTE, copyToClipboard, Door,
   DOOR_KINDS, EMPTY_FLOOR, Floor, FloorLayer, LAYER_LABEL, MACHINE_LABEL,
   MACHINE_PRESET, MachineKind, missingMachineData, Obstacle, obstacleHeight, obstacleKind, polygonArea,
   polygonCentroid, polygonPerimeter, polygonSelfIntersects, Product, ROUTING_HELP, ROUTING_LABEL,
@@ -1205,6 +1205,7 @@ export default function FloorAdmin({
             onDraftInsert={(after, p) => setDraft((d) => [...d.slice(0, after + 1), p, ...d.slice(after + 1)])}
             onDraftFinish={finishDrawing}
             onDraftStartNew={() => { setDraft([]); setDraftClosed(false); setMode("draw"); }}
+            onDraftReopen={() => { setDraftClosed(false); setMode("draw"); }}
             rectMode={!phone && mode === "rect"}
             onDraftRect={(pts) => {
               if (layer === "outline") {
@@ -1300,6 +1301,7 @@ export default function FloorAdmin({
             {mode !== "select" && mode !== "measure" && (() => {
               const selfInt = polygonLayer && draft.length >= 4 && polygonSelfIntersects(draft);
               const rectInfo = polygonLayer ? rectDimensions(draft) : null;
+              const circleInfo = polygonLayer ? circleDimensions(draft) : null;
               return (
               <Card className="draw-card">
                 <div className="card-title-row">
@@ -1376,6 +1378,15 @@ export default function FloorAdmin({
                                 <NumericInput small className="draw-dim-num" aria-label="Breite (m)" buttonPosition="none"
                                   value={rectInfo.d} min={0.1} stepSize={0.05}
                                   onValueChange={(v) => { if (Number.isFinite(v) && v >= 0.1) setDraft((d) => resizeRectPolygon(d, rectInfo.w, v)); }} />
+                              </label>
+                            </div>
+                          )}
+                          {circleInfo && (
+                            <div className="draw-rect-dims">
+                              <label className="sub">Ø (m)
+                                <NumericInput small className="draw-dim-num" aria-label="Durchmesser Ø (m)" buttonPosition="none"
+                                  value={circleInfo.diameter} min={0.1} stepSize={0.25} minorStepSize={0.05}
+                                  onValueChange={(v) => { if (Number.isFinite(v) && v >= 0.1) setDraft((d) => resizeCirclePolygon(d, v)); }} />
                               </label>
                             </div>
                           )}
