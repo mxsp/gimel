@@ -407,20 +407,29 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
         )
 
     dirty = subprocess.run(
-        ["git", "-C", str(root), "status", "--porcelain"],
+        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
         capture_output=True,
         text=True,
         check=False,
     )
+    stashed = False
     if dirty.stdout.strip():
-        return UpdateResult(
-            ok=False,
-            install_kind="git",
-            from_version=APP_VERSION,
-            to_version=tag.lstrip("v"),
-            detail="Lokale ungespeicherte Änderungen im Ordner — bitte zuerst speichern oder verwerfen.",
-            command_hint=f"git fetch --tags origin && git checkout {tag}",
+        st = subprocess.run(
+            ["git", "-C", str(root), "stash", "push", "-m", f"gimel-auto-backup-before-{tag}"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
+        if st.returncode != 0:
+            return UpdateResult(
+                ok=False,
+                install_kind="git",
+                from_version=APP_VERSION,
+                to_version=tag.lstrip("v"),
+                detail="Lokale Änderungen konnten nicht automatisch gesichert werden.",
+                command_hint=f"git stash && git fetch --tags origin && git checkout {tag}",
+            )
+        stashed = True
 
     remote_url = f"https://github.com/{info.repo}.git"
     fetch = subprocess.run(
@@ -480,13 +489,14 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
                 )
 
     clear_cache()
+    extra_note = " (Lokale Änderungen wurden sicher im Git-Stash gesichert.)" if stashed else ""
     return UpdateResult(
         ok=True,
         install_kind="git",
         from_version=APP_VERSION,
         to_version=tag.lstrip("v"),
         restart_required=True,
-        detail=f"Gimel wurde auf {tag} aktualisiert.",
+        detail=f"Gimel wurde auf {tag} aktualisiert.{extra_note}",
     )
 
 
