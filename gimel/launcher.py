@@ -156,24 +156,36 @@ def _prepare_production(
         ).strip().lower()
         pw = (admin_password or os.environ.get("GIMEL_ADMIN_PASSWORD", "")).strip()
         name = (admin_name or os.environ.get("GIMEL_ADMIN_NAME", "") or username).strip()
-        if user_count == 0 and username and pw:
+        if username and pw:
             if len(pw) < 8:
                 print(
                     "FEHLER: GIMEL_ADMIN_PASSWORD muss mindestens 8 Zeichen lang sein.",
                     file=sys.stderr,
                 )
                 return 2
-            db.add(
-                User(
-                    email=username,
-                    name=name,
-                    role=Role.admin,
-                    password_hash=hash_password(pw),
-                    active=True,
+            existing = db.query(User).filter(User.email == username).first()
+            if existing is not None:
+                existing.password_hash = hash_password(pw)
+                existing.role = Role.admin
+                existing.active = True
+                existing.email_verified = True
+                existing.failed_login_count = 0
+                existing.locked_until = None
+                db.commit()
+                print(f"[Production] Admin-Konto aktualisiert & entsperrt: {username}")
+            else:
+                db.add(
+                    User(
+                        email=username,
+                        name=name,
+                        role=Role.admin,
+                        password_hash=hash_password(pw),
+                        active=True,
+                        email_verified=True,
+                    )
                 )
-            )
-            db.commit()
-            print(f"[Production] Erstes Admin-Konto angelegt: {username}")
+                db.commit()
+                print(f"[Production] Admin-Konto angelegt: {username}")
         elif user_count == 0:
             print(
                 "[Production] Noch kein Konto vorhanden — erstes Admin-Konto direkt im Browser anlegen\n"
@@ -247,6 +259,9 @@ def run_both(
     base_dir: Path,
     reset: bool = False,
     no_browser: bool = False,
+    admin_email: str = "",
+    admin_password: str = "",
+    admin_name: str = "",
 ) -> int:
     """Launch isolated Playground and Production instances side by side."""
     if getattr(sys, "frozen", False):
@@ -274,6 +289,10 @@ def run_both(
         "--data-dir", str(base_dir),
         "--no-browser",
     ]
+    if admin_email and admin_password:
+        prod_cmd += ["--admin-user", admin_email, "--admin-password", admin_password]
+        if admin_name:
+            prod_cmd += ["--admin-name", admin_name]
 
     print(f"Starte Gimel Playground (:{playground_port}) und Production (:{production_port}) …")
     procs = [subprocess.Popen(pg_cmd), subprocess.Popen(prod_cmd)]
@@ -381,6 +400,9 @@ def main(argv: list[str] | None = None) -> int:
             base_dir=base_dir,
             reset=args.reset,
             no_browser=args.no_browser,
+            admin_email=args.admin_email,
+            admin_password=args.admin_password,
+            admin_name=args.admin_name,
         )
 
     port = args.port or (PLAYGROUND_PORT if mode == "playground" else PRODUCTION_PORT)

@@ -406,14 +406,45 @@ def _create_setup_server(port: int, root_dir: Path) -> tuple[ThreadingHTTPServer
                 self._json({"ok": False, "detail": "Das Admin-Passwort braucht mindestens 8 Zeichen."}, 400)
                 return
 
+            # Synchronously create/update the Production admin account directly in
+            # <root_dir>/production/gimel.db BEFORE launching the server so it always
+            # works (even in 'both' mode or when re-running setup on an existing DB).
+            if mode in ("production", "both") and admin_user and admin_password:
+                from . import master_admin
+
+                try:
+                    existing = next(
+                        (a for a in master_admin.list_accounts(root_dir, "production") if a["username"] == admin_user),
+                        None,
+                    )
+                    if existing is not None:
+                        master_admin.update_account(
+                            root_dir,
+                            "production",
+                            int(existing["id"]),
+                            password=admin_password,
+                            role="admin",
+                            active=True,
+                            unlock=True,
+                        )
+                    else:
+                        master_admin.create_account(
+                            root_dir,
+                            "production",
+                            username=admin_user,
+                            password=admin_password,
+                            role="admin",
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    self._json({"ok": False, "detail": f"Admin-Konto konnte nicht eingerichtet werden: {exc}"}, 400)
+                    return
+
             if getattr(sys, "frozen", False):
                 cmd = [sys.executable]
             else:
                 cmd = [sys.executable, "-m", "gimel.launcher"]
 
             cmd += ["--mode", mode, "--host", host, "--data-dir", str(root_dir), "--no-browser"]
-            if mode in ("production", "both") and admin_user and admin_password:
-                cmd += ["--admin-user", admin_user, "--admin-password", admin_password]
 
             from . import desktop as desktop_mod
 
@@ -431,10 +462,14 @@ def _create_setup_server(port: int, root_dir: Path) -> tuple[ThreadingHTTPServer
             subprocess.Popen(cmd, **kwargs)
 
             open_port = launcher.PLAYGROUND_PORT if mode == "playground" else launcher.PRODUCTION_PORT
+            # Wait until the launched Gimel server actually answers /api/health (up to 20s)
+            desktop_mod._wait_until_ready(f"http://127.0.0.1:{open_port}/api/health", timeout_seconds=20.0)
+
             local_url = f"http://127.0.0.1:{open_port}/app/"
             lan_ips = local_lan_ips()
             lan_url = f"http://{lan_ips[0]}:{open_port}/app/" if (host == "0.0.0.0" and lan_ips) else ""
-            detail = f"Modus: {mode} · Weiterleitung in 2 Sekunden…"
+            admin_note = f" · Admin: {admin_user}" if (mode in ("production", "both") and admin_user and admin_password) else ""
+            detail = f"Modus: {mode}{admin_note} · Weiterleitung…"
             self._json({"ok": True, "url": local_url, "lan_url": lan_url, "detail": detail})
             if server_ref:
                 threading.Timer(4.0, server_ref[0].shutdown).start()
