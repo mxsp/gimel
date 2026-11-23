@@ -1,31 +1,85 @@
-"""Tests for the Gimel Native Desktop App (Gimel.exe + gimel.desktop)."""
+"""Tests for the Gimel Native Desktop App & Local Master Admin Console."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import urllib.error
 import urllib.request
 from pathlib import Path
 
-from gimel import desktop, setup_ui
+import pytest
+
+from gimel import desktop, master_admin, setup_ui
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_desktop_target_resolution_and_config(tmp_path: Path) -> None:
-    # Fresh base dir -> opens setup wizard inside desktop window
-    assert desktop.resolve_desktop_target("auto", tmp_path) == "setup"
+def test_desktop_target_resolution_defaults_to_master(tmp_path: Path) -> None:
+    assert desktop.resolve_desktop_target("auto", tmp_path) == "master"
+    assert desktop.resolve_desktop_target("master", tmp_path) == "master"
     assert desktop.resolve_desktop_target("playground", tmp_path) == "playground"
     assert desktop.resolve_desktop_target("production", tmp_path) == "production"
+    assert desktop.resolve_desktop_target("setup", tmp_path) == "setup"
 
-    # Saving desktop preference switches auto resolution to saved mode
-    desktop.save_desktop_config(tmp_path, default_mode="production", host="0.0.0.0")
-    cfg = desktop.load_desktop_config(tmp_path)
-    assert cfg["default_mode"] == "production"
-    assert desktop.resolve_desktop_target("auto", tmp_path) == "production"
 
-    desktop.save_desktop_config(tmp_path, default_mode="playground", host="127.0.0.1")
-    assert desktop.resolve_desktop_target("auto", tmp_path) == "playground"
+def test_master_admin_account_crud_and_last_admin_guard(tmp_path: Path) -> None:
+    assert master_admin.list_accounts(tmp_path, "production") == []
+
+    admin = master_admin.create_account(
+        tmp_path, "production", username="chef", password="StrongPassword123", role="admin"
+    )
+    assert admin["username"] == "chef"
+    assert admin["role"] == "admin"
+    assert admin["active"] is True
+
+    # Safety guard: cannot deactivate or demote the last active admin
+    with pytest.raises(ValueError, match="letzte aktive Admin"):
+        master_admin.update_account(tmp_path, "production", admin["id"], active=False)
+    with pytest.raises(ValueError, match="letzte aktive Admin"):
+        master_admin.update_account(tmp_path, "production", admin["id"], role="staff")
+
+    # Add second user, reset password, promote, then deactivate
+    staff = master_admin.create_account(
+        tmp_path, "production", username="buero", password="OfficePassword123", role="staff"
+    )
+    updated = master_admin.update_account(
+        tmp_path, "production", staff["id"], role="admin", password="NewPassword456", unlock=True, logout_all=True
+    )
+    assert updated["role"] == "admin"
+    assert updated["locked"] is False
+
+    deactivated = master_admin.update_account(tmp_path, "production", staff["id"], active=False)
+    assert deactivated["active"] is False
+
+
+def test_master_admin_http_requires_session_token(tmp_path: Path) -> None:
+    ctrl = master_admin.MasterAdminController(tmp_path)
+    port = ctrl.start_http(port=0)
+    try:
+        # Root HTML loads cleanly on 127.0.0.1
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as resp:
+            assert resp.status == 200
+            html = resp.read().decode("utf-8")
+        assert "Gimel Master Admin" in html
+
+        # API without token is rejected with 403
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/master/status", timeout=3)
+        assert exc.value.code == 403
+
+        # API with valid X-Master-Token succeeds
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/master/status",
+            headers={"X-Master-Token": ctrl.token},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        assert "servers" in data
+        assert "production" in data["servers"]
+        assert "playground" in data["servers"]
+    finally:
+        ctrl.shutdown_all()
 
 
 def test_desktop_entrypoint_defaults_to_desktop_mode() -> None:

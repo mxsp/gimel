@@ -334,9 +334,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--target",
-        choices=["auto", "playground", "production", "setup"],
+        choices=["auto", "master", "playground", "production", "setup"],
         default="auto",
-        help="Ziel-Ansicht für --mode desktop (auto, playground, production, setup)",
+        help="Ziel-Ansicht für --mode desktop (auto/master, playground, production, setup)",
     )
     parser.add_argument("--host", default=os.environ.get("GIMEL_HOST", DEFAULT_HOST))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GIMEL_PORT", "0") or 0))

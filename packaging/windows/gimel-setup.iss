@@ -5,7 +5,7 @@
 ; optional Private-LAN Windows Firewall rule, uninstaller, and automatic Desktop App launch.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.6"
+  #define AppVersion "0.2.7"
 #endif
 
 [Setup]
@@ -52,7 +52,7 @@ Source: "gimel.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Gimel"; Filename: "{app}\Gimel.exe"; IconFilename: "{app}\gimel.ico"
+Name: "{group}\Gimel (Master Admin & Start)"; Filename: "{app}\Gimel.exe"; IconFilename: "{app}\gimel.ico"
 Name: "{group}\Gimel Production (Echtbetrieb)"; Filename: "{app}\Gimel.exe"; Parameters: "--target production"; IconFilename: "{app}\gimel.ico"
 Name: "{group}\Gimel Playground (Demo)"; Filename: "{app}\Gimel.exe"; Parameters: "--target playground"; IconFilename: "{app}\gimel.ico"
 Name: "{group}\Gimel Einrichtungs-Assistent"; Filename: "{app}\Gimel.exe"; Parameters: "--target setup"; IconFilename: "{app}\gimel.ico"

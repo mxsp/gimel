@@ -29,7 +29,7 @@ from typing import Literal
 from . import launcher
 from .version import APP_VERSION
 
-DesktopTarget = Literal["auto", "playground", "production", "setup"]
+DesktopTarget = Literal["auto", "master", "playground", "production", "setup"]
 
 SPLASH_HTML = """<!doctype html>
 <html lang="de">
@@ -120,20 +120,11 @@ def save_desktop_config(base_dir: Path, *, default_mode: str, host: str = "0.0.0
         pass
 
 
-def resolve_desktop_target(target: DesktopTarget, base_dir: Path) -> Literal["playground", "production", "setup"]:
-    if target in ("playground", "production", "setup"):
+def resolve_desktop_target(target: DesktopTarget, base_dir: Path) -> Literal["master", "playground", "production", "setup"]:
+    if target in ("master", "playground", "production", "setup"):
         return target
-    cfg = load_desktop_config(base_dir)
-    saved = str(cfg.get("default_mode") or "").strip().lower()
-    if saved == "playground":
-        return "playground"
-    if saved in ("production", "both"):
-        return "production"
-    if (base_dir / "production" / "gimel.db").is_file():
-        return "production"
-    if (base_dir / "playground" / "gimel.db").is_file():
-        return "playground"
-    return "setup"
+    # Default desktop launch opens the simple Master Admin & Start Control Center
+    return "master"
 
 
 def _url_ready(url: str, timeout: float = 0.6) -> bool:
@@ -247,7 +238,16 @@ def run_desktop(
     resolved = resolve_desktop_target(target, root_dir)
 
     shutdown_cb = lambda: None  # noqa: E731
-    if resolved == "setup":
+    if resolved == "master":
+        from . import master_admin
+
+        ctrl = master_admin.MasterAdminController(root_dir, host=effective_host)
+        actual_port = ctrl.start_http(port=port)
+        target_url = f"http://127.0.0.1:{actual_port}/"
+        health_url = target_url
+        window_title = f"Gimel v{APP_VERSION} — Master Admin"
+        shutdown_cb = ctrl.shutdown_all
+    elif resolved == "setup":
         from . import setup_ui
 
         srv, actual_port = setup_ui.start_setup_ui_background(port=port or 8099, base_dir=root_dir)
