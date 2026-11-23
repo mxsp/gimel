@@ -407,7 +407,6 @@ export default function FloorPlan({
     return () => svg.removeEventListener("wheel", onWheel);
   }, [toMeter, fit, editorLook, drawing]);
 
-  const [orthoLock, setOrthoLock] = useState(true);
   const spaceDownRef = useRef(false);
   useEffect(() => {
     if (!editorLook && !drawing) return;
@@ -473,17 +472,7 @@ export default function FloorPlan({
     if (!d) return;
     const [mx, my] = toMeter(e.clientX, e.clientY);
     if (d.kind === "draft") {
-      let x = snap(mx);
-      let y = snap(my);
-      if (draft && draft.length >= 2 && !e.shiftKey) {
-        const alignTol = 8 * metersPerPx();
-        for (let k = 0; k < draft.length; k++) {
-          if (k === d.idx) continue;
-          if (Math.abs(x - draft[k][0]) < alignTol) x = draft[k][0];
-          if (Math.abs(y - draft[k][1]) < alignTol) y = draft[k][1];
-        }
-      }
-      const p: [number, number] = [x, y];
+      const p: [number, number] = [snap(mx), snap(my)];
       onDraftMove?.(d.idx, p);
       setTip({ x: p[0], y: p[1] - 0.45, text: `${fmtNum(p[0])} · ${fmtNum(p[1])} m` });
       return;
@@ -630,48 +619,26 @@ export default function FloorPlan({
     if (!polygonMode || !draftClosed) setIndentMode(false);
   }, [polygonMode, draftClosed]);
 
-  /** Zeigerposition mit allen Rastern: Fangweite, 90°-Winkelrast + Fluchtlinien auf
-      vorhandene Eckpunkte, Magnet auf den Startpunkt (schließt das Polygon). */
+  /** Zeigerposition auf dem Meterraster (Fangweite):
+      folgt direkt dem Mauszeiger ohne erzwungenen 90°-Achsensprung.
+      Magnet auf den Startpunkt P1 zum Schließen; optional Umschalt = horizontal/vertikal. */
   const displayCursor = useCallback((): [number, number] | null => {
     if (!cursorState) return null;
     let x = snap(cursorState.x);
     let y = snap(cursorState.y);
     const anchorPts = polygonMode ? draft : null;
-    const useOrtho = orthoLock ? !cursorState.shift : cursorState.shift;
     if (anchorPts?.length) {
       const p0 = anchorPts[0];
-      if (anchorPts.length >= 3 && Math.hypot(x - p0[0], y - p0[1]) < 15 * metersPerPx()) return p0;
-      const last = anchorPts[anchorPts.length - 1];
-      const alignTol = 9 * metersPerPx();
-      if (useOrtho) {
-        const horiz = Math.abs(x - last[0]) >= Math.abs(y - last[1]);
-        if (horiz) {
-          y = last[1];
-          // Nur X auf bestehende Ecken einrasten (niemals auf last[0] selbst, sonst Länge 0!).
-          for (const pt of anchorPts) {
-            if (Math.abs(pt[0] - last[0]) >= snapM && Math.abs(x - pt[0]) < alignTol) {
-              x = pt[0];
-              break;
-            }
-          }
-        } else {
-          x = last[0];
-          // Nur Y auf bestehende Ecken einrasten (niemals auf last[1] selbst!).
-          for (const pt of anchorPts) {
-            if (Math.abs(pt[1] - last[1]) >= snapM && Math.abs(y - pt[1]) < alignTol) {
-              y = pt[1];
-              break;
-            }
-          }
-        }
-      } else {
-        for (const pt of anchorPts) {
-          if (Math.abs(x - pt[0]) < alignTol && Math.abs(pt[0] - last[0]) >= snapM) x = pt[0];
-          if (Math.abs(y - pt[1]) < alignTol && Math.abs(pt[1] - last[1]) >= snapM) y = pt[1];
-        }
+      if (anchorPts.length >= 3 && Math.hypot(cursorState.x - p0[0], cursorState.y - p0[1]) < 14 * metersPerPx()) {
+        return p0;
+      }
+      if (cursorState.shift) {
+        const last = anchorPts[anchorPts.length - 1];
+        if (Math.abs(x - last[0]) >= Math.abs(y - last[1])) y = last[1];
+        else x = last[0];
       }
     }
-    if (aisleMode && useOrtho && aisleAnchor != null) {
+    if (aisleMode && cursorState.shift && aisleAnchor != null) {
       const a = floor.aisles?.nodes?.[aisleAnchor];
       if (a) {
         if (Math.abs(x - a[0]) >= Math.abs(y - a[1])) y = a[1];
@@ -679,7 +646,7 @@ export default function FloorPlan({
       }
     }
     return [x, y];
-  }, [cursorState, snap, snapM, polygonMode, draft, metersPerPx, aisleMode, aisleAnchor, floor.aisles, orthoLock]);
+  }, [cursorState, snap, polygonMode, draft, metersPerPx, aisleMode, aisleAnchor, floor.aisles]);
 
   const onBgPointerMove = (e: React.PointerEvent) => {
     if (dragRef.current) { applyDrag(e); return; }
@@ -947,12 +914,12 @@ export default function FloorPlan({
   const hint =
     measureMode ? "Messen: zwei Klicks setzen Anfang und Ende. Das Maß bleibt stehen, bis du neu misst."
     : rectMode ? "Rechteck: aufziehen (Klicken & Ziehen) oder zwei Ecken anklicken · Mausrad zoomt · Leertaste+Ziehen verschiebt."
-    : aisleMode ? "Gang: Klick auf oder nahe einer Maschine setzt den Knoten auf ihre Mitte · Klick auf Knoten hängt an · 90°-Rast aktiv · Rechtsklick teilt/löscht."
+    : aisleMode ? "Gang: Klick auf oder nahe einer Maschine setzt den Knoten auf ihre Mitte · Klick auf Knoten hängt an · Rechtsklick teilt/löscht."
     : doorMode ? "Zugang: Klick rastet an der nächsten Wand ein (Alt = frei) · Ziehen verschiebt ihn."
     : draftCircle ? "Bohrung / Rundkörper: Innenfläche ziehen verschiebt · 4 Randgriffe ziehen ändert Durchmesser Ø · Enter legt an."
     : polygonMode && draftClosed && indentMode ? "Einbuchtung aktiv: Klick oder Ziehen auf einer Wand stanzt sofort eine 90°-Einbuchtung · Wandkante ziehen passt Tiefe an."
-    : polygonMode && draftClosed ? "Ecken ziehen · Wandkante ziehen verschiebt Wand · [⊔]-Griff auf Wand zieht 90°-Einbuchtung · (+)-Griff teilt Wand · Enter übernimmt."
-    : polygonMode ? "Offener Linienzug: Klick setzt nächste Wand-Ecke (90°-Rast aktiv, Umschalt = frei) · Einbuchtungen frei nach innen zeichnen · Klick auf Startpunkt (grün) oder Enter schließt."
+    : polygonMode && draftClosed ? "Ecken frei ziehen · Wandkante ziehen verschiebt Wand · [⊔]-Griff auf Wand zieht Einbuchtung · (+)-Griff teilt Wand · Enter übernimmt."
+    : polygonMode ? "Offener Linienzug: Klick setzt nächste Ecke frei auf dem Raster (Umschalt = Achse halten) · Klick auf Startpunkt (grün) oder Enter schließt."
     : movable ? "Klick wählt Station, Wand, Zone oder Tür · Ziehen verschiebt · Eckpunkte skalieren · Kreis dreht · Mausrad zoomt."
     : "Mausrad zoomt · Ziehen schiebt · Klick oder Enter auf Station öffnet sie.";
 
@@ -968,17 +935,6 @@ export default function FloorPlan({
       <div className="floor-toolbar">
         <span className="floor-hint">{hint}</span>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          {((polygonMode && !draftCircle) || aisleMode) && (
-            <Button
-              small
-              minimal={!orthoLock}
-              intent={orthoLock ? "primary" : "none"}
-              icon="layout"
-              text="90°-Rast"
-              title="Rechtwinkliges Zeichnen & Fluchtlinien (Umschalt kehrt temporär um)"
-              onClick={() => setOrthoLock((v) => !v)}
-            />
-          )}
           {polygonMode && draftClosed && !draftCircle && (draft?.length ?? 0) >= 3 && onDraftReplace && (
             <Button
               small
@@ -1363,13 +1319,10 @@ export default function FloorPlan({
             // Nur geschlossene Zonen/Hindernisse lassen sich über die Innenfläche verschieben —
             // beim Hallenumriss oder während des offenen Zeichnens (!draftClosed) bleibt das Innere frei für Klicks!
             const canDragBody = draftClosed && draft.length >= 3 && !!onDraftReplace && layer !== "outline" && !indentMode;
-            // Auch Fluchtlinien zu Startpunkt P1 prüfen (damit sich die letzte Ecke sauber auf P1 ausrichten lässt)!
-            const alignTolM = 9 * metersPerPx();
-            const alignLines = !draftClosed && cursor
-              ? draft.filter((pt, idx) =>
-                  idx !== draft.length - 1 &&
-                  (Math.abs(pt[0] - cursor[0]) < Math.max(0.05, alignTolM * 0.6) ||
-                   Math.abs(pt[1] - cursor[1]) < Math.max(0.05, alignTolM * 0.6)))
+            // Nur exakte Raster-Fluchtlinie zum Startpunkt P1 zeigen (keine magnetischen Fangfallen).
+            const alignLines = !draftClosed && cursor && draft.length >= 2 &&
+              (Math.abs(draft[0][0] - cursor[0]) < 1e-6 || Math.abs(draft[0][1] - cursor[1]) < 1e-6)
+              ? [draft[0]]
               : [];
 
             // Spezial-Darstellung für kreisförmige Bohrungen / Rundstützen (keine 24 Eckquadrate!)
