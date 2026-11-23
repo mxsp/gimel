@@ -118,5 +118,5 @@ def test_windows_packaging_builds_windowed_desktop_app() -> None:
     iss_text = (ROOT / "packaging" / "windows" / "gimel-setup.iss").read_text(encoding="utf-8")
     assert 'UninstallDisplayIcon={app}\\Gimel.exe' in iss_text
     assert 'Name: "{autodesktop}\\Gimel"; Filename: "{app}\\Gimel.exe"' in iss_text
-    assert 'Filename: "{app}\\Gimel.exe"; Description: "Gimel Desktop-App jetzt starten"' in iss_text
-    assert 'gimel-cli.exe' in iss_text
+    assert 'Filename: "{app}\\Gimel.exe"; Description: "Gimel Desktop & Master Admin jetzt öffnen"' in iss_text
+    assert '--mode production --init-only --admin-user' in iss_text
