@@ -637,6 +637,22 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--no-web", action="store_true", help="skip rebuilding web assets on git updates")
     up.set_defaults(fn=_update_cmd)
 
+    dk = sub.add_parser("desktop", help="launch Gimel as a native desktop application window")
+    dk.add_argument("--target", choices=["auto", "playground", "production", "setup"], default="auto")
+    dk.add_argument("--host", default=HOST)
+    dk.add_argument("--port", type=int, default=0)
+    dk.add_argument("--data-dir", default=None)
+    dk.add_argument("--reset", action="store_true")
+    dk.set_defaults(
+        fn=lambda a: __import__("gimel.desktop", fromlist=["run_desktop"]).run_desktop(
+            target=a.target,
+            host=a.host,
+            port=a.port,
+            base_dir=Path(a.data_dir).expanduser() if a.data_dir else None,
+            reset=a.reset,
+        )
+    )
+
     args = p.parse_args(argv)
     return int(args.fn(args) or 0)
 

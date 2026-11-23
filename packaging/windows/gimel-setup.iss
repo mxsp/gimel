@@ -1,11 +1,11 @@
-; Gimel Windows Installer (Inno Setup 6)
-; Produces Gimel-Setup-x64.exe from the PyInstaller --onedir bundle (no self-extracting
-; %TEMP%\_MEI* unpacker), with Start Menu / Desktop shortcuts, direct winget installation
-; for Python 3.12 and Docker Desktop (no hidden PowerShell dropper heuristics), optional
-; Private-LAN Windows Firewall rule, uninstaller, and automatic Setup UI launch.
+; Gimel Windows Desktop App Installer (Inno Setup 6)
+; Produces Gimel-Setup-x64.exe installing the native windowed Gimel Desktop Program
+; (Gimel.exe, console=False, WebView2 / Edge app window) + gimel-cli.exe, with Start Menu
+; and Desktop shortcuts, direct winget installation for Python 3.12 and Docker Desktop,
+; optional Private-LAN Windows Firewall rule, uninstaller, and automatic Desktop App launch.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.5"
+  #define AppVersion "0.2.6"
 #endif
 
 [Setup]
@@ -24,7 +24,7 @@ LicenseFile=..\..\LICENSE
 OutputDir=..\dist
 OutputBaseFilename=Gimel-Setup-x64
 SetupIconFile=gimel.ico
-UninstallDisplayIcon={app}\gimel.exe
+UninstallDisplayIcon={app}\Gimel.exe
 WizardStyle=modern
 WizardImageFile=wizard-side.bmp
 WizardSmallImageFile=wizard-small.bmp
@@ -52,18 +52,19 @@ Source: "gimel.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Gimel Einrichtungs-Assistent"; Filename: "{app}\gimel.exe"; Parameters: "--mode setup-ui"; IconFilename: "{app}\gimel.ico"
-Name: "{group}\Gimel Production (Echtbetrieb)"; Filename: "{app}\gimel.exe"; Parameters: "--mode production"; IconFilename: "{app}\gimel.ico"
-Name: "{group}\Gimel Playground (Demo)"; Filename: "{app}\gimel.exe"; Parameters: "--mode playground"; IconFilename: "{app}\gimel.ico"
-Name: "{group}\Gimel Beide (Playground + Production)"; Filename: "{app}\gimel.exe"; Parameters: "--mode both"; IconFilename: "{app}\gimel.ico"
+Name: "{group}\Gimel"; Filename: "{app}\Gimel.exe"; IconFilename: "{app}\gimel.ico"
+Name: "{group}\Gimel Production (Echtbetrieb)"; Filename: "{app}\Gimel.exe"; Parameters: "--target production"; IconFilename: "{app}\gimel.ico"
+Name: "{group}\Gimel Playground (Demo)"; Filename: "{app}\Gimel.exe"; Parameters: "--target playground"; IconFilename: "{app}\gimel.ico"
+Name: "{group}\Gimel Einrichtungs-Assistent"; Filename: "{app}\Gimel.exe"; Parameters: "--target setup"; IconFilename: "{app}\gimel.ico"
+Name: "{group}\Gimel Server (Konsole)"; Filename: "{app}\gimel-cli.exe"; Parameters: "--mode both"; IconFilename: "{app}\gimel.ico"
 Name: "{group}\{cm:UninstallProgram,Gimel}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Gimel"; Filename: "{app}\gimel.exe"; Parameters: "--mode setup-ui"; IconFilename: "{app}\gimel.ico"; Tasks: desktopicon
+Name: "{autodesktop}\Gimel"; Filename: "{app}\Gimel.exe"; IconFilename: "{app}\gimel.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""Gimel Localnet (8040-8041)"" dir=in action=allow protocol=TCP localport=8040-8041 profile=private"; Flags: runhidden waituntilterminated; Tasks: lanfirewall
 Filename: "winget.exe"; Parameters: "install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements --scope user"; Flags: waituntilterminated skipifdoesntexist; StatusMsg: "Installiere Python 3.12 über winget..."; Tasks: installpython
 Filename: "winget.exe"; Parameters: "install --id Docker.DockerDesktop -e --accept-package-agreements --accept-source-agreements"; Flags: waituntilterminated skipifdoesntexist; StatusMsg: "Installiere Docker Desktop über winget..."; Tasks: installdocker
-Filename: "{app}\gimel.exe"; Parameters: "--mode setup-ui"; Description: "Gimel Einrichtungs-Assistent jetzt öffnen"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Gimel.exe"; Description: "Gimel Desktop-App jetzt starten"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""Gimel Localnet (8040-8041)"""; Flags: runhidden; RunOnceId: "RemoveGimelFirewallRule"

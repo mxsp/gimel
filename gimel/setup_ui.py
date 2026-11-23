@@ -345,8 +345,8 @@ $("form").onsubmit = async (e) => {
 """
 
 
-def run_setup_ui(*, port: int = 8099, base_dir: Path | None = None, no_browser: bool = False) -> int:
-    root_dir = base_dir or launcher._default_base_dir()
+def _create_setup_server(port: int, root_dir: Path) -> tuple[ThreadingHTTPServer, int]:
+    server_ref: list[ThreadingHTTPServer] = []
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:  # noqa: A002
@@ -415,33 +415,56 @@ def run_setup_ui(*, port: int = 8099, base_dir: Path | None = None, no_browser: 
             if mode in ("production", "both") and admin_user and admin_password:
                 cmd += ["--admin-user", admin_user, "--admin-password", admin_password]
 
+            from . import desktop as desktop_mod
+
+            desktop_mod.save_desktop_config(root_dir, default_mode=mode, host=host)
+
             kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
             if os.name == "nt":
-                kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                kwargs["creationflags"] = (
+                    subprocess.DETACHED_PROCESS
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                    | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                )  # type: ignore[attr-defined]
             else:
                 kwargs["start_new_session"] = True
             subprocess.Popen(cmd, **kwargs)
 
             open_port = launcher.PLAYGROUND_PORT if mode == "playground" else launcher.PRODUCTION_PORT
-            local_url = f"http://127.0.0.1:{open_port}/app"
+            local_url = f"http://127.0.0.1:{open_port}/app/"
             lan_ips = local_lan_ips()
-            lan_url = f"http://{lan_ips[0]}:{open_port}/app" if (host == "0.0.0.0" and lan_ips) else ""
+            lan_url = f"http://{lan_ips[0]}:{open_port}/app/" if (host == "0.0.0.0" and lan_ips) else ""
             detail = f"Modus: {mode} · Weiterleitung in 2 Sekunden…"
             self._json({"ok": True, "url": local_url, "lan_url": lan_url, "detail": detail})
-            threading.Timer(4.0, server.shutdown).start()
+            if server_ref:
+                threading.Timer(4.0, server_ref[0].shutdown).start()
 
-    server: ThreadingHTTPServer | None = None
     for candidate in (port, port + 1, port + 2, 0):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
-            port = server.server_address[1]
-            break
+            srv = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
+            server_ref.append(srv)
+            return srv, int(srv.server_address[1])
         except OSError:
             continue
-    if server is None:
+    raise OSError("Kein freier lokaler Port für den Gimel Einrichtungs-Assistenten gefunden.")
+
+
+def start_setup_ui_background(*, port: int = 8099, base_dir: Path | None = None) -> tuple[ThreadingHTTPServer, int]:
+    """Start the embedded Setup UI on a background daemon thread (for desktop mode)."""
+    root_dir = base_dir or launcher._default_base_dir()
+    srv, actual_port = _create_setup_server(port, root_dir)
+    threading.Thread(target=srv.serve_forever, name="gimel-setup-ui", daemon=True).start()
+    return srv, actual_port
+
+
+def run_setup_ui(*, port: int = 8099, base_dir: Path | None = None, no_browser: bool = False) -> int:
+    root_dir = base_dir or launcher._default_base_dir()
+    try:
+        server, actual_port = _create_setup_server(port, root_dir)
+    except OSError:
         return 1
 
-    url = f"http://127.0.0.1:{port}/"
+    url = f"http://127.0.0.1:{actual_port}/"
     print(f"Gimel Einrichtungs-Assistent: {url}")
     if not no_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()

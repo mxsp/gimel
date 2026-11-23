@@ -27,7 +27,7 @@ def test_inno_setup_iss_has_python_and_docker_tasks() -> None:
     run_section = iss[iss.index("[Run]"):iss.index("[UninstallRun]")]
     idx_py = run_section.index("Python.Python.3.12")
     idx_dk = run_section.index("Docker.DockerDesktop")
-    idx_ui = run_section.index('Parameters: "--mode setup-ui"')
+    idx_ui = run_section.index('{app}\\Gimel.exe')
     assert idx_py < idx_ui
     assert idx_dk < idx_ui
     assert "winget.exe" in run_section

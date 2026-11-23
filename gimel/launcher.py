@@ -25,7 +25,7 @@ import webbrowser
 from pathlib import Path
 from typing import Literal
 
-Mode = Literal["playground", "production", "both", "setup-ui"]
+Mode = Literal["playground", "production", "both", "setup-ui", "desktop"]
 
 DEFAULT_HOST = "0.0.0.0"
 PLAYGROUND_PORT = 8040
@@ -328,9 +328,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=["playground", "production", "both", "setup-ui"],
+        choices=["playground", "production", "both", "setup-ui", "desktop"],
         default=os.environ.get("GIMEL_MODE") or None,
-        help="Betriebsmodus: playground (Demo), production (Echtbetrieb), both (beide parallel), setup-ui (Einrichtungs-Assistent)",
+        help="Betriebsmodus: desktop (Desktop-App), playground (Demo), production (Echtbetrieb), both (beide parallel), setup-ui (Einrichtungs-Assistent)",
+    )
+    parser.add_argument(
+        "--target",
+        choices=["auto", "playground", "production", "setup"],
+        default="auto",
+        help="Ziel-Ansicht für --mode desktop (auto, playground, production, setup)",
     )
     parser.add_argument("--host", default=os.environ.get("GIMEL_HOST", DEFAULT_HOST))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GIMEL_PORT", "0") or 0))
@@ -345,6 +351,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     mode: Mode = args.mode or _pick_mode_interactive()
     base_dir = Path(args.data_dir).expanduser() if args.data_dir else _default_base_dir()
+
+    if mode == "desktop":
+        from . import desktop
+
+        return desktop.run_desktop(
+            target=args.target,
+            host=args.host,
+            port=args.port,
+            base_dir=base_dir,
+            reset=args.reset,
+        )
 
     if mode == "setup-ui":
         from . import setup_ui

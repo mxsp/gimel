@@ -344,8 +344,8 @@ def _apply_binary_update(info: UpdateStatus) -> UpdateResult:
         elif low.endswith(".zip"):
             with zipfile.ZipFile(dl_path, "r") as zf:
                 zf.extractall(tmp_dir / "extracted")
-            for candidate in (tmp_dir / "extracted").rglob("gimel.exe"):
-                if candidate.is_file():
+            for candidate in (tmp_dir / "extracted").rglob("*"):
+                if candidate.is_file() and candidate.name.lower() == "gimel.exe":
                     new_bin = candidate
                     break
         else:
