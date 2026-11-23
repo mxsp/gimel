@@ -18,6 +18,8 @@ ADMIN_USER=""
 ADMIN_PASSWORD=""
 NON_INTERACTIVE=0
 SKIP_WEB=0
+WITH_PIPER=0
+PIPER_VOICE="de_DE-thorsten-medium"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -26,6 +28,8 @@ while [[ $# -gt 0 ]]; do
     --admin-password) ADMIN_PASSWORD="${2:-}"; shift 2 ;;
     --non-interactive) NON_INTERACTIVE=1; shift ;;
     --skip-web) SKIP_WEB=1; shift ;;
+    --with-piper) WITH_PIPER=1; shift ;;
+    --piper-voice) PIPER_VOICE="${2:-de_DE-thorsten-medium}"; WITH_PIPER=1; shift 2 ;;
     -h|--help)
       sed -n '2,12p' "$0"
       exit 0
@@ -90,6 +94,19 @@ if [[ "$MODE" == "production" || "$MODE" == "both" ]]; then
   fi
 else
   echo "[4/4] Playground-only setup complete."
+fi
+
+if [[ "$WITH_PIPER" -eq 0 && "$NON_INTERACTIVE" -eq 0 && -t 0 ]]; then
+  echo ""
+  read -r -p "Optional (Opt-In): Install local Piper TTS voice (GPL-3.0, ${PIPER_VOICE})? [y/N]: " ANS || true
+  if [[ "${ANS,,}" == "y" || "${ANS,,}" == "yes" || "${ANS,,}" == "j" || "${ANS,,}" == "ja" ]]; then
+    WITH_PIPER=1
+  fi
+fi
+
+if [[ "$WITH_PIPER" -eq 1 ]]; then
+  echo "[Opt-In] Installing local Piper TTS (GPL-3.0) + voice ${PIPER_VOICE}..."
+  .venv/bin/gimel piper-install --voice "$PIPER_VOICE" --accept-gpl
 fi
 
 echo ""

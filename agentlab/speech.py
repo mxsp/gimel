@@ -19,6 +19,9 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import re
+import subprocess
+import sys
 import threading
 import wave
 from pathlib import Path
@@ -38,6 +41,12 @@ VOICES = EDGE_VOICES
 DEFAULT_VOICE = EDGE_DEFAULT
 
 PIPER_DEFAULT = "de_DE-thorsten-medium"
+PIPER_CATALOG: dict[str, str] = {
+    "de_DE-thorsten-medium": "Thorsten (Deutsch, mittel — empfohlen)",
+    "de_DE-eva_k-x_low": "Eva (Deutsch, kompakt)",
+    "en_US-lessac-medium": "Lessac (Englisch US, mittel)",
+}
+_VOICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,80}$")
 MAX_CHARS = 3000
 
 _piper_cache: dict[str, object] = {}
@@ -115,6 +124,63 @@ def available(backend: str = DEFAULT_BACKEND) -> bool:
     if backend == "edge":
         return _edge_installed()
     return _piper_installed() and bool(piper_voices())
+
+
+def piper_status() -> dict:
+    installed = _piper_installed()
+    found = piper_voices()
+    return {
+        "installed": installed,
+        "ready": installed and bool(found),
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "voice_dir": str(piper_dir()),
+        "default_voice": default_voice("lokal") or PIPER_DEFAULT,
+        "voices": [{"id": k, "name": v} for k, v in found.items()],
+        "catalog": [{"id": k, "name": v} for k, v in PIPER_CATALOG.items()],
+        "license": "GPL-3.0 (optional opt-in)",
+    }
+
+
+def install_piper(voice: str = PIPER_DEFAULT) -> dict:
+    """Install optional Piper TTS (GPL-3.0) and download a local ONNX voice."""
+    chosen = (voice or PIPER_DEFAULT).strip()
+    if not _VOICE_RE.match(chosen):
+        raise ValueError("Ungültiger Stimmname für Piper TTS.")
+    if getattr(sys, "frozen", False):
+        raise RuntimeError(
+            "Automatische Piper-Installation ist im Standalone-Binary nicht verfügbar — "
+            "bitte Piper separat installieren oder den Quell-/Setup-Modus verwenden."
+        )
+
+    if not _piper_installed():
+        res = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "piper-tts>=1.2", "--quiet"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode != 0:
+            detail = (res.stderr or res.stdout or "").strip()[-400:]
+            raise RuntimeError(f"Installation von piper-tts fehlgeschlagen: {detail}")
+
+    folder = piper_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    onnx = folder / f"{chosen}.onnx"
+    cfg = folder / f"{chosen}.onnx.json"
+    if not (onnx.is_file() and cfg.is_file()):
+        dl = subprocess.run(
+            [sys.executable, "-m", "piper.download_voices", "--download-dir", str(folder), chosen],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if dl.returncode != 0:
+            detail = (dl.stderr or dl.stdout or "").strip()[-400:]
+            raise RuntimeError(f"Download der Stimme '{chosen}' fehlgeschlagen: {detail}")
+
+    with _piper_lock:
+        _piper_cache.clear()
+    return piper_status()
 
 
 def media_type(backend: str) -> str:

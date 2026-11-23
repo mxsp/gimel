@@ -71,6 +71,14 @@ def system_check() -> dict:
     venv_ready = _venv_bin("python").is_file()
     web_built = (ROOT / "gimel" / "webapp" / "dist" / "index.html").is_file()
     lab_built = (ROOT / "agentlab" / "webapp" / "dist" / "index.html").is_file()
+    piper_ready = False
+    if venv_ready:
+        chk = subprocess.run(
+            [str(_venv_bin("python")), "-c", "import piper"],
+            capture_output=True,
+            check=False,
+        )
+        piper_ready = chk.returncode == 0
     return {
         "root": str(ROOT),
         "platform": f"{platform.system()} {platform.machine()}",
@@ -81,6 +89,7 @@ def system_check() -> dict:
         "docker": {"ok": bool(docker_ver), "version": docker_ver or "optional"},
         "venv_ready": venv_ready,
         "web_built": web_built and lab_built,
+        "piper_ready": piper_ready,
         "lan_ips": _lan_ips(),
     }
 
@@ -151,6 +160,8 @@ def _install_worker(opts: dict) -> None:
     admin_user = str(opts.get("admin_user") or "").strip().lower()
     admin_password = str(opts.get("admin_password") or "")
     reset_pg = bool(opts.get("reset_playground", False))
+    install_piper = bool(opts.get("install_piper", False))
+    piper_voice = str(opts.get("piper_voice") or "de_DE-thorsten-medium").strip()
 
     with STATE.lock:
         STATE.running = True
@@ -222,6 +233,15 @@ def _install_worker(opts: dict) -> None:
                 raise RuntimeError("Production-Einrichtung fehlgeschlagen.")
         else:
             STATE.set_step("4/4 Production übersprungen")
+
+        if install_piper:
+            STATE.set_step(f"Opt-In: Lokale Sprachausgabe mit Piper TTS (GPL-3.0 · {piper_voice}) installieren")
+            rc = _run_stream(
+                [str(py_bin), "-m", "gimel.cli", "piper-install", "--voice", piper_voice, "--accept-gpl"],
+                ROOT,
+            )
+            if rc != 0:
+                raise RuntimeError("Opt-In Installation von Piper TTS fehlgeschlagen.")
 
         STATE.log("\nInstallation erfolgreich abgeschlossen!")
         with STATE.lock:
@@ -389,8 +409,11 @@ HTML = r"""<!doctype html>
       </label>
     </div>
 
-    <div class="row" style="justify-content:space-between;">
-      <label class="check-row"><input id="build_web" type="checkbox" checked /> Frontend-Oberflächen bauen (/app, /studio, /twin, /lab)</label>
+    <div class="row" style="justify-content:space-between;align-items:flex-start;">
+      <div style="display:grid;gap:8px;">
+        <label class="check-row"><input id="build_web" type="checkbox" checked /> Frontend-Oberflächen bauen (/app, /studio, /twin, /lab)</label>
+        <label class="check-row"><input id="install_piper" type="checkbox" /> Optional (Opt-In): Lokale Sprachausgabe mit Piper TTS installieren (GPL-3.0 · de_DE-thorsten-medium)</label>
+      </div>
       <button id="install-btn" class="primary" type="submit">Gimel jetzt einrichten</button>
     </div>
   </form>
@@ -428,6 +451,7 @@ async function loadCheck() {
     ["Node.js / npm", d.node.ok ? `${d.node.version} · npm ${d.npm.version}` : "nicht gefunden", d.node.ok ? "ok" : "warn"],
     ["Umgebung (.venv)", d.venv_ready ? "vorhanden" : "wird angelegt", "ok"],
     ["Oberflächen", d.web_built ? "bereits gebaut" : "werden gebaut", d.web_built ? "ok" : "warn"],
+    ["Piper TTS", d.piper_ready ? "installiert (GPL-3.0)" : "Opt-In (optional)", d.piper_ready ? "ok" : "warn"],
     ["LAN-Adresse", d.lan_ips.length ? d.lan_ips[0] : "127.0.0.1", "ok"],
   ];
   $("checks").innerHTML = items.map(([k, v, cls]) =>
@@ -495,6 +519,8 @@ $("form").onsubmit = async (e) => {
     admin_user: $("admin_user").value.trim(),
     admin_password: $("admin_password").value,
     build_web: $("build_web").checked,
+    install_piper: $("install_piper").checked,
+    piper_voice: "de_DE-thorsten-medium",
   };
   await fetch("/api/install", {
     method: "POST",

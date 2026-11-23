@@ -1253,3 +1253,43 @@ export async function streamMessage(
     }
   }
 }
+
+export interface PiperStatus {
+  installed: boolean;
+  ready: boolean;
+  frozen: boolean;
+  voice_dir: string;
+  default_voice: string;
+  voices: Array<{ id: string; name: string }>;
+  catalog: Array<{ id: string; name: string }>;
+  license: string;
+}
+
+export async function getPiperStatus(): Promise<PiperStatus> {
+  return api<PiperStatus>("/api/agent/speech/piper-status");
+}
+
+export async function installPiperTts(voice: string, acceptGpl: boolean): Promise<PiperStatus> {
+  return api<PiperStatus>("/api/agent/speech/piper-install", {
+    method: "POST",
+    body: JSON.stringify({ voice, accept_gpl: acceptGpl }),
+  });
+}
+
+export async function speakAudio(text: string, voice = ""): Promise<Blob> {
+  const token = getToken();
+  const r = await fetch("/api/agent/speech", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ text, voice }),
+  });
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new ApiError(r.status, data.detail ?? "Sprachausgabe fehlgeschlagen.");
+  }
+  return r.blob();
+}

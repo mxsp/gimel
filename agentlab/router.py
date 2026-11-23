@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from gimel.db import get_db
 from gimel.models import AuditLog, User
-from gimel.security import has_admin_work, require_staff, require_worker
+from gimel.security import has_admin_work, require_admin, require_staff, require_worker
 
 from . import files as file_service
 from . import page_context
@@ -1689,9 +1689,53 @@ class SpeechIn(BaseModel):
     rate: float = Field(1.0, ge=0.8, le=1.4)
 
 
+class PiperInstallIn(BaseModel):
+    accept_gpl: bool = False
+    voice: str = speech_service.PIPER_DEFAULT
+
+
 def _tts_backend(db: Session) -> str:
     value = agent_settings.get(db, "agent_tts_backend")
     return value if value in speech_service.BACKENDS else speech_service.DEFAULT_BACKEND
+
+
+@router.get("/speech/piper-status")
+def piper_status_endpoint(
+    user: Annotated[User, Depends(require_worker)],
+) -> dict:
+    return speech_service.piper_status()
+
+
+@router.post("/speech/piper-install")
+async def piper_install_endpoint(
+    body: PiperInstallIn,
+    db: Annotated[Session, Depends(get_db)],
+    actor: Annotated[User, Depends(require_admin)],
+) -> dict:
+    if not body.accept_gpl:
+        raise HTTPException(
+            status_code=400,
+            detail="Bitte bestätigen Sie das Opt-In für Piper TTS (GPL-3.0).",
+        )
+    try:
+        status_data = await asyncio.to_thread(speech_service.install_piper, body.voice)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    agent_settings.set_value(db, "agent_tts_backend", "lokal", actor.email)
+    db.add(
+        AuditLog(
+            actor=actor.email,
+            action="piper_tts_opt_in",
+            entity="settings",
+            entity_id="agent_tts_backend",
+            detail={"voice": body.voice, "ready": status_data.get("ready", False)},
+        )
+    )
+    db.commit()
+    return status_data
 
 
 @router.get("/speech")

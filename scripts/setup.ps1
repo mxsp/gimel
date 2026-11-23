@@ -9,7 +9,9 @@ param(
     [string]$Mode = "both",
     [string]$AdminUser = "",
     [string]$AdminPassword = "",
-    [switch]$SkipWeb
+    [switch]$SkipWeb,
+    [switch]$WithPiper,
+    [string]$PiperVoice = "de_DE-thorsten-medium"
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +62,11 @@ if ($Mode -eq "production" -or $Mode -eq "both") {
     } else {
         & .\.venv\Scripts\gimel.exe setup --mode production
     }
+}
+
+if ($WithPiper) {
+    Write-Host "[Opt-In] Installing local Piper TTS (GPL-3.0) + voice $PiperVoice..."
+    & .\.venv\Scripts\gimel.exe piper-install --voice $PiperVoice --accept-gpl
 }
 
 Write-Host ""

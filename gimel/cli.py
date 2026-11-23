@@ -502,6 +502,31 @@ def _install_ui_cmd(args: argparse.Namespace) -> int:
     return subprocess.call(cmd)
 
 
+def _piper_install_cmd(args: argparse.Namespace) -> int:
+    """Explicit opt-in installer for optional Piper TTS (GPL-3.0) + local voice."""
+    from agentlab import speech as speech_service
+
+    if not args.accept_gpl:
+        if not (sys.stdin and sys.stdin.isatty()):
+            print("Error: Piper TTS is GPL-3.0 opt-in. Pass --accept-gpl to confirm.", file=sys.stderr)
+            return 2
+        print("Piper TTS is an optional third-party package licensed under GPL-3.0.")
+        print(f"Voice model to download locally: {args.voice}")
+        ans = input("Install Piper TTS (GPL-3.0) and download this voice? [y/N]: ").strip().lower()
+        if ans not in ("y", "yes", "j", "ja"):
+            print("Cancelled.")
+            return 0
+    try:
+        st = speech_service.install_piper(args.voice)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Piper TTS ready: {st['ready']} (dir: {st['voice_dir']})")
+    for v in st["voices"]:
+        print(f"  - {v['id']}: {v['name']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="gimel", description="Gimel — orders in, parts out.")
     p.add_argument("--version", action="version", version=f"gimel {__version__}")
@@ -598,6 +623,11 @@ def main(argv: list[str] | None = None) -> int:
     iu.add_argument("--port", type=int, default=8099)
     iu.add_argument("--no-browser", action="store_true")
     iu.set_defaults(fn=_install_ui_cmd)
+
+    pi = sub.add_parser("piper-install", help="opt-in install for local Piper TTS (GPL-3.0) + voice model")
+    pi.add_argument("--voice", default="de_DE-thorsten-medium")
+    pi.add_argument("--accept-gpl", action="store_true", help="confirm GPL-3.0 opt-in non-interactively")
+    pi.set_defaults(fn=_piper_install_cmd)
 
     up = sub.add_parser("update", help="check or apply updates from GitHub Releases (mxsp/gimel)")
     up.add_argument("--check", action="store_true", help="only check for a newer GitHub release")

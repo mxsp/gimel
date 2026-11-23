@@ -3,9 +3,9 @@ import {
 } from "@blueprintjs/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AgentSettings as SettingsData, ApiError, getAgentSettings, getSandboxStatus,
-  resetAgentSettings, SandboxRuntimeStatus, SandboxTestResult, SettingField,
-  testSandbox, testWebSearch, updateAgentSettings, WebSearchResult,
+  AgentSettings as SettingsData, ApiError, getAgentSettings, getPiperStatus, getSandboxStatus,
+  installPiperTts, PiperStatus, resetAgentSettings, SandboxRuntimeStatus, SandboxTestResult,
+  SettingField, speakAudio, testSandbox, testWebSearch, updateAgentSettings, WebSearchResult,
 } from "./api";
 
 const GROUPS: Array<{ key: SettingField["group"]; title: string; sub: string }> = [
@@ -56,6 +56,11 @@ export default function AgentSettings({
   const [sandboxStatus, setSandboxStatus] = useState<SandboxRuntimeStatus | null>(null);
   const [testingSandbox, setTestingSandbox] = useState(false);
   const [sandboxResult, setSandboxResult] = useState<SandboxTestResult | null>(null);
+  const [piperStatus, setPiperStatus] = useState<PiperStatus | null>(null);
+  const [piperVoice, setPiperVoice] = useState("de_DE-thorsten-medium");
+  const [piperAcceptGpl, setPiperAcceptGpl] = useState(false);
+  const [installingPiper, setInstallingPiper] = useState(false);
+  const [testingPiper, setTestingPiper] = useState(false);
 
   const apply = useCallback((next: SettingsData) => {
     setData(next);
@@ -69,18 +74,26 @@ export default function AgentSettings({
     } catch { /* optional */ }
   }, []);
 
+  const refreshPiper = useCallback(async () => {
+    try {
+      const st = await getPiperStatus();
+      setPiperStatus(st);
+      if (st.default_voice) setPiperVoice(st.default_voice);
+    } catch { /* optional */ }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       apply(await getAgentSettings());
-      await refreshSandbox();
+      await Promise.all([refreshSandbox(), refreshPiper()]);
       setError("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [apply, refreshSandbox]);
+  }, [apply, refreshSandbox, refreshPiper]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -441,6 +454,90 @@ export default function AgentSettings({
                 </li>
               ))}
             </ol>
+          )}
+          {group.key === "voice" && (
+            <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+              <div className="settings-test" style={{ flexWrap: "wrap", gap: 8 }}>
+                <Tag minimal intent={piperStatus?.ready ? "success" : "none"} icon="volume-up">
+                  Piper TTS: {piperStatus?.ready ? "aktiv & bereit" : piperStatus?.installed ? "installiert (Stimme fehlt)" : "nicht installiert (Opt-In)"}
+                </Tag>
+                <Tag minimal icon="document">Lizenz: {piperStatus?.license ?? "GPL-3.0 (optional opt-in)"}</Tag>
+                {(piperStatus?.voices ?? []).map((v) => (
+                  <Tag key={v.id} minimal intent="primary">{v.name}</Tag>
+                ))}
+                {piperStatus?.ready && (
+                  <Button
+                    small
+                    icon="play"
+                    text="Stimme testen"
+                    loading={testingPiper}
+                    onClick={async () => {
+                      setTestingPiper(true);
+                      setError("");
+                      try {
+                        const blob = await speakAudio("Hallo, die lokale Gimel Sprachausgabe mit Piper funktioniert.", piperVoice);
+                        const url = URL.createObjectURL(blob);
+                        const audio = new Audio(url);
+                        audio.onended = () => URL.revokeObjectURL(url);
+                        await audio.play();
+                      } catch (err) {
+                        setError(err instanceof ApiError ? err.message : String(err));
+                      } finally {
+                        setTestingPiper(false);
+                      }
+                    }}
+                  />
+                )}
+              </div>
+              {data.admin && !piperStatus?.frozen && (
+                <div style={{ display: "grid", gap: 8, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--lab-line, var(--g-line))" }}>
+                  <Switch
+                    checked={piperAcceptGpl}
+                    label="Opt-In: Optionales Piper TTS (GPL-3.0) lokal installieren und Stimme herunterladen — kein Text verlässt diesen Rechner"
+                    style={{ margin: 0 }}
+                    onChange={(e) => setPiperAcceptGpl(e.currentTarget.checked)}
+                  />
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <HTMLSelect
+                      value={piperVoice}
+                      disabled={installingPiper}
+                      aria-label="Piper Stimme"
+                      onChange={(e) => setPiperVoice(e.currentTarget.value)}
+                    >
+                      {(piperStatus?.catalog ?? [
+                        { id: "de_DE-thorsten-medium", name: "Thorsten (Deutsch, mittel — empfohlen)" },
+                        { id: "de_DE-eva_k-x_low", name: "Eva (Deutsch, kompakt)" },
+                        { id: "en_US-lessac-medium", name: "Lessac (Englisch US, mittel)" },
+                      ]).map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </HTMLSelect>
+                    <Button
+                      intent="primary"
+                      icon="cloud-download"
+                      text={piperStatus?.ready ? "Weitere Stimme laden" : "Piper TTS installieren"}
+                      disabled={!piperAcceptGpl || installingPiper}
+                      loading={installingPiper}
+                      onClick={async () => {
+                        setInstallingPiper(true);
+                        setError("");
+                        setNotice("");
+                        try {
+                          const next = await installPiperTts(piperVoice, true);
+                          setPiperStatus(next);
+                          setValues((prev) => ({ ...prev, agent_tts_backend: "lokal" }));
+                          setNotice(`Piper TTS mit Stimme „${piperVoice}“ ist bereit.`);
+                        } catch (err) {
+                          setError(err instanceof ApiError ? err.message : String(err));
+                        } finally {
+                          setInstallingPiper(false);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </section>
       ))}
