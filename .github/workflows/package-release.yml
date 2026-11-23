@@ -30,8 +30,8 @@ jobs:
         shell: pwsh
         run: ./packaging/build-exe.ps1 -SkipInno
 
-      - name: Azure Login for Trusted Signing (optional — runs when secrets configured)
-        if: ${{ vars.AZURE_SIGNING_ENDPOINT != '' && secrets.AZURE_CLIENT_ID != '' }}
+      - name: Azure Login for Trusted Signing (optional — runs when AZURE_SIGNING_ENDPOINT variable is set)
+        if: ${{ vars.AZURE_SIGNING_ENDPOINT != '' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -39,7 +39,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign gimel.exe with Azure Trusted Signing
-        if: ${{ vars.AZURE_SIGNING_ENDPOINT != '' && secrets.AZURE_CLIENT_ID != '' }}
+        if: ${{ vars.AZURE_SIGNING_ENDPOINT != '' }}
         uses: azure/trusted-signing-action@v0.5.9
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -57,7 +57,7 @@ jobs:
         run: ./packaging/build-exe.ps1 -OnlyInno
 
       - name: Sign Gimel-Setup-x64.exe with Azure Trusted Signing
-        if: ${{ vars.AZURE_SIGNING_ENDPOINT != '' && secrets.AZURE_CLIENT_ID != '' }}
+        if: ${{ vars.AZURE_SIGNING_ENDPOINT != '' }}
         uses: azure/trusted-signing-action@v0.5.9
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
