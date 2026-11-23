@@ -54,6 +54,7 @@ from .routers import (
     robot_platform,
     robots,
     shipping,
+    updates,
     users,
 )
 from .seed import init_db
@@ -271,7 +272,7 @@ def create_app() -> FastAPI:
 
 
     for r in (
-            auth.router, account.router, accounts.router, users.router, products.router, rates.router,
+            auth.router, account.router, accounts.router, updates.router, users.router, products.router, rates.router,
             quotes.router, production.router, production.public_router, nesting.router, punchout.router, admin.router,
             shipping.router, links.router, inventory.router, integration.router, customers.router,
             desk.router, invoicing.router, factory.router,

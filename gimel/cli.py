@@ -399,6 +399,93 @@ def _accounts_cmd(args: argparse.Namespace) -> int:
     return 1
 
 
+def _update_cmd(args: argparse.Namespace) -> int:
+    """Check or apply updates from GitHub Releases (mxsp/gimel)."""
+    from .services import updater
+
+    info = updater.check_for_update(force=True, repo=args.repo or None)
+    print(f"Repository:   https://github.com/{info.repo}")
+    print(f"Installed:    v{info.current_version} ({info.install_kind})")
+    print(f"Latest:       {info.latest_tag or 'none'}")
+    if info.error:
+        print(f"Status:       {info.error}", file=sys.stderr)
+        return 1 if args.apply else 0
+    if info.update_available:
+        print(f"Status:       Update available ({info.release_url})")
+    else:
+        print("Status:       Already up to date.")
+
+    if info.release_notes and (args.check or info.update_available):
+        print("\nRelease notes:\n" + info.release_notes[:1200])
+
+    if args.check and not args.apply:
+        return 0
+    if not args.apply and not info.update_available and not args.tag:
+        return 0
+
+    res = updater.apply_update(target_tag=args.tag or None, rebuild_web=not args.no_web)
+    print(res.detail)
+    if res.command_hint:
+        print(f"Command:      {res.command_hint}")
+    return 0 if res.ok else 1
+
+
+def _setup_cmd(args: argparse.Namespace) -> int:
+    """One-time setup wizard for Playground or Production (localnet + username/password)."""
+    from . import launcher
+
+    mode = args.mode
+    if not mode:
+        if sys.stdin and sys.stdin.isatty():
+            print("Gimel One-Time Setup")
+            print("  [1] Playground (Demo plant 'Musterwerk GmbH', port 8040)")
+            print("  [2] Production (Clean localnet database, port 8041)")
+            choice = input("Select mode [1/2, default 2]: ").strip()
+            mode = "playground" if choice == "1" else "production"
+        else:
+            mode = "production"
+
+    base_dir = Path(args.data_dir).expanduser() if args.data_dir else launcher._default_base_dir()
+    data_dir = launcher._mode_data_dir(base_dir, mode)
+    launcher._configure_env_before_import(mode, data_dir, args.host)
+
+    if mode == "playground":
+        email, password = launcher._prepare_playground(data_dir, reset=args.reset)
+        print("=" * 64)
+        print("  Gimel Playground setup complete (Localnet-only)")
+        print(f"  Data dir: {data_dir}")
+        print(f"  Username: {email}")
+        print(f"  Password: {password}")
+        print("  Start:    gimel playground")
+        print("=" * 64)
+        return 0
+
+    username = (args.admin_user or "").strip().lower()
+    password = (args.admin_password or "").strip()
+    if not username and sys.stdin and sys.stdin.isatty():
+        username = input("First admin username [admin]: ").strip().lower() or "admin"
+    if username and not password and sys.stdin and sys.stdin.isatty():
+        password = getpass.getpass(f"Password for '{username}' (min. 8 chars): ")
+        confirm = getpass.getpass("Confirm password: ")
+        if password != confirm:
+            print("Error: passwords do not match.", file=sys.stderr)
+            return 1
+
+    rc = launcher._prepare_production(username, password, username)
+    if rc != 0:
+        return rc
+    print("=" * 64)
+    print("  Gimel Production setup complete (Localnet-only)")
+    print(f"  Data dir: {data_dir}")
+    if username and password:
+        print(f"  Admin:    {username}")
+    else:
+        print("  Admin:    Create in browser on first visit (http://127.0.0.1:8041/app)")
+    print("  Start:    gimel production")
+    print("=" * 64)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="gimel", description="Gimel — orders in, parts out.")
     p.add_argument("--version", action="version", version=f"gimel {__version__}")
@@ -481,6 +568,23 @@ def main(argv: list[str] | None = None) -> int:
         ap = acc_sub.add_parser(act, help=desc)
         ap.add_argument("username")
         ap.set_defaults(fn=_accounts_cmd)
+
+    st = sub.add_parser("setup", help="one-time localnet setup (Playground or Production + first admin)")
+    st.add_argument("--mode", choices=["playground", "production"], default=None)
+    st.add_argument("--data-dir", default=None)
+    st.add_argument("--host", default=HOST)
+    st.add_argument("--reset", action="store_true", help="reset playground database if re-running setup")
+    st.add_argument("--admin-user", default="")
+    st.add_argument("--admin-password", default="")
+    st.set_defaults(fn=_setup_cmd)
+
+    up = sub.add_parser("update", help="check or apply updates from GitHub Releases (mxsp/gimel)")
+    up.add_argument("--check", action="store_true", help="only check for a newer GitHub release")
+    up.add_argument("--apply", action="store_true", help="download and apply the latest release")
+    up.add_argument("--tag", default="", help="install a specific release tag (e.g. v0.2.0)")
+    up.add_argument("--repo", default="", help="override GitHub repo (default: mxsp/gimel)")
+    up.add_argument("--no-web", action="store_true", help="skip rebuilding web assets on git updates")
+    up.set_defaults(fn=_update_cmd)
 
     args = p.parse_args(argv)
     return int(args.fn(args) or 0)

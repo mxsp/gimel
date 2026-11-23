@@ -50,6 +50,7 @@ export default function AdminPage() {
         <Tab id="agent" title="Assistent & Sandbox" panel={<AgentAdminPanel />} />
         <Tab id="protokoll" title="Protokoll" panel={<AuditPanel />} />
         <Tab id="strom" title="Ereignisse" panel={<EventsPanel />} />
+        <Tab id="updates" title="Updates" panel={<UpdatesPanel />} />
       </Tabs>
     </PageFrame>
   );
@@ -748,6 +749,173 @@ function EventsPanel() {
             ))}
           </tbody>
         </HTMLTable>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --------------------------------------------------------------------------
+// GitHub Release Updates — /api/updates/status & /api/updates/apply
+// --------------------------------------------------------------------------
+
+interface UpdateStatusData {
+  repo: string;
+  current_version: string;
+  latest_version: string | null;
+  latest_tag: string | null;
+  update_available: boolean;
+  install_kind: "binary" | "docker" | "git" | "package";
+  checked_at: number;
+  release_name: string;
+  release_notes: string;
+  release_url: string;
+  published_at: string;
+  matched_asset: { name: string; download_url: string; size: number } | null;
+  error: string;
+}
+
+interface UpdateApplyData {
+  ok: boolean;
+  install_kind: string;
+  from_version: string;
+  to_version: string;
+  restart_required: boolean;
+  detail: string;
+  command_hint: string;
+}
+
+const INSTALL_KIND_LABEL: Record<string, string> = {
+  binary: "Standalone-Programm",
+  docker: "Docker-Container",
+  git: "Git-Checkout",
+  package: "Python-Paket",
+};
+
+function UpdatesPanel() {
+  const [info, setInfo] = useState<UpdateStatusData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [result, setResult] = useState<UpdateApplyData | null>(null);
+
+  const check = useCallback(async (force = false) => {
+    setLoading(true);
+    try {
+      const data = await api<UpdateStatusData>(`/api/updates/status${force ? "?force=true" : ""}`);
+      setInfo(data);
+    } catch (e: any) {
+      toastError(e.message ?? "Update-Prüfung fehlgeschlagen.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { check(false); }, [check]);
+
+  const apply = async () => {
+    if (!info) return;
+    setApplying(true);
+    setResult(null);
+    try {
+      const res = await api<UpdateApplyData>("/api/updates/apply", {
+        method: "POST",
+        body: JSON.stringify({ tag: info.latest_tag, rebuild_web: true }),
+      });
+      setResult(res);
+      if (res.ok) {
+        toastSuccess(res.detail || "Update abgeschlossen.");
+      } else {
+        toastError(res.detail || "Update nicht automatisch anwendbar.");
+      }
+    } catch (e: any) {
+      toastError(e.message ?? "Update fehlgeschlagen.");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  if (!info && loading) return <Spinner size={28} />;
+  if (!info) {
+    return (
+      <NonIdealState
+        icon="cloud-download"
+        title="Update-Status nicht geladen"
+        action={<Button icon="refresh" text="Erneut prüfen" onClick={() => check(true)} />}
+      />
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: 760 }}>
+      <Toolbar
+        meta={
+          <span className="sub">
+            Quelle: <span className="mono">github.com/{info.repo}</span> ·{" "}
+            {INSTALL_KIND_LABEL[info.install_kind] ?? info.install_kind}
+          </span>
+        }
+        end={
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button icon="refresh" text="Auf Updates prüfen" loading={loading} onClick={() => check(true)} />
+            {info.release_url && (
+              <a className="bp5-button" href={info.release_url} target="_blank" rel="noreferrer">
+                GitHub Releases
+              </a>
+            )}
+          </div>
+        }
+      />
+
+      {info.error ? (
+        <Callout intent="warning" title="Hinweis zur Update-Prüfung">
+          {info.error}
+        </Callout>
+      ) : info.update_available ? (
+        <Callout intent="primary" title={`Neues Release verfügbar: ${info.latest_tag}`}>
+          <p style={{ marginTop: 4 }}>
+            Installiert: <b className="mono">v{info.current_version}</b> → Neu:{" "}
+            <b className="mono">{info.latest_tag}</b>
+            {info.published_at ? ` (${fmtDateTime(info.published_at)})` : ""}
+          </p>
+          {info.matched_asset && (
+            <p className="sub" style={{ marginTop: 4 }}>
+              Paket: <span className="mono">{info.matched_asset.name}</span>{" "}
+              ({(info.matched_asset.size / (1024 * 1024)).toFixed(1)} MB)
+            </p>
+          )}
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Button
+              intent="primary"
+              icon="cloud-download"
+              text={info.install_kind === "docker" ? "Update-Befehl anzeigen" : `Auf ${info.latest_tag} aktualisieren`}
+              loading={applying}
+              onClick={apply}
+            />
+          </div>
+        </Callout>
+      ) : (
+        <Callout intent="success" title={`Gimel v${info.current_version} ist aktuell`}>
+          Neuestes GitHub Release: <b className="mono">{info.latest_tag ?? `v${info.current_version}`}</b>.
+        </Callout>
+      )}
+
+      {result && (
+        <Callout
+          intent={result.ok ? "success" : "warning"}
+          title={result.ok ? "Update angewendet" : "Manueller Schritt erforderlich"}
+          style={{ marginTop: 12 }}
+        >
+          <p style={{ marginTop: 4 }}>{result.detail}</p>
+          {result.command_hint && (
+            <pre className="ui-json" style={{ marginTop: 8 }}>{result.command_hint}</pre>
+          )}
+        </Callout>
+      )}
+
+      {info.release_notes && (
+        <div style={{ marginTop: 16 }}>
+          <h3 style={{ marginBottom: 6 }}>Release Notes ({info.release_name || info.latest_tag})</h3>
+          <pre className="ui-json" style={{ whiteSpace: "pre-wrap" }}>{info.release_notes}</pre>
         </div>
       )}
     </div>

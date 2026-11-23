@@ -1,51 +1,75 @@
-# Gimel — Order, Nesting & Production Management
+# Gimel — Localnet ERP, 3D Factory Twin & Agent Lab
 
-Gimel is a local-first manufacturing ERP, MES, sheet-nesting, and 3D factory twin platform for sheet-cutting job shops and manufacturers.
+**Gimel** is a local-first manufacturing ERP, MES, 2D sheet-nesting, 3D factory twin, and AI assistant platform built for sheet-cutting job shops and manufacturers.
 
-- **ERP Portal (`/app`)** — Orders, order desk, automated & interactive 2D sheet nesting (`lite` & `kerf`), picking (`Kommissionierung`), station worklists (`Arbeitsvorrat`), split `Arbeitsplätze` directory, production tracking, shipping, invoicing, inventory, materials, and calendar.
-- **Twin Studio (`/studio`) & Floor Plan (`/twin`)** — Interactive 2D/3D hall layout, station status, material flow, and bottleneck analysis.
-- **AI Assistant (`/lab` + docked Copilot)** — Optional assistant workspace (`agentlab/`) with configurable LLM providers, tools, routines, and artifacts.
+- **Localnet-only by default (`GIMEL_LOCALNET_ONLY=1`)** — Restricted to loopback & private LAN subnets (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, ULA); blocks public peers and public proxy headers with `403`.
+- **Simple Account Manager (Username + Password)** — Local accounts via `/app#/benutzer`, `/api/accounts`, or `gimel accounts`, with browser-based first-run admin setup on empty databases.
 - **Always ships with both modes:**
-  - **Playground (`:8040`)** — Isolated sandbox pre-seeded with the fictional demo plant *Musterwerk GmbH* (`--reset` anytime).
-  - **Production (`:8041`)** — Clean, empty production database (SQLite or PostgreSQL), strict secret/token validation, `/docs` disabled, and first-run admin setup right in the browser or via CLI.
-- **Localnet-only by default (`GIMEL_LOCALNET_ONLY=1`)** — Blocks non-localnet peers and public proxy forwarding headers (`X-Forwarded-For`, `CF-Connecting-IP`, `Forwarded`) with `403`.
-- **Simple Account Manager (Username + Password)** — Manage local accounts via `/app#/benutzer`, `/api/accounts`, or `gimel accounts list|add|passwd|role|enable|disable|unlock|delete`.
+  - **Playground (`:8040`)** — Isolated sandbox pre-seeded with *Musterwerk GmbH* (`--reset` anytime).
+  - **Production (`:8041`)** — Clean database (SQLite or PostgreSQL), strict production security, `/docs` disabled.
+- **Built-in GitHub Release Updater** — Check and update directly from `mxsp/gimel` releases in **Admin → Updates** or via `gimel update`.
 
+> **Manual:** See the complete [Installation & User Manual](./docs/MANUAL.md) for step-by-step setup, daily workflows, account administration, updates, and backups.  
 > **License:** Source-available for **non-commercial use only** (see [LICENSE](./LICENSE)). Commercial use requires a separate license.
 
 ---
 
-## Quick Start
+## Showcase
 
-### 1. Docker (Playground + Production)
+### ERP Portal — Daily Dashboard & Shop-Floor Control (`/app`)
+Manage quotes, orders, automated 2D sheet nesting (`lite` & `kerf`), disposition, station worklists (`Arbeitsvorrat` & `Arbeitsplätze`), picking, production, shipping, inventory, and invoicing in one fast interface.
 
-Start both Playground (`http://127.0.0.1:8040/app`) and Production + PostgreSQL (`http://127.0.0.1:8041/app`):
+![Gimel ERP Dashboard](docs/screenshots/erp-dashboard.png)
 
+![Gimel Shop-Floor Worklist](docs/screenshots/erp-worklist.png)
+
+### 3D Factory Twin Studio (`/studio`) & Floor Plan (`/twin`)
+Visualize live station status, edit hall layouts, machines, aisles, and storage zones in interactive 2D/3D, and save camera presets.
+
+![Gimel 3D Factory Twin Studio](docs/screenshots/twin-studio.png)
+
+### Gimel Agent Lab (`/lab`) & Docked Copilot
+Connect a local LLM (such as Ollama on your LAN) or cloud provider to inspect orders, schedules, stock, and factory data with tool execution and reversible change tracking.
+
+![Gimel Agent Lab](docs/screenshots/agent-lab.png)
+
+### Localnet Account Manager (`#/benutzer`)
+Create and manage local `Admin`, `Personal`, and `Werker` logins using only **Username + Password** — no mail server or external directory needed.
+
+![Gimel Account Manager](docs/screenshots/account-manager.png)
+
+---
+
+## One-Time Setup & Quick Start
+
+### Option 1: One-Time Setup Script (Recommended for Local / LAN Install)
+
+Run once to create `.venv`, install Gimel, build all SPAs (`/app`, `/studio`, `/twin`, `/lab`), and initialize both Playground and Production:
+
+**Linux / macOS:**
 ```bash
-cp .env.example .env
-# Edit .env to set POSTGRES_PASSWORD, GIMEL_SECRET_KEY, and GIMEL_ADMIN_PASSWORD
-docker compose up -d --build
+git clone https://github.com/mxsp/gimel.git
+cd gimel
+./scripts/setup.sh
 ```
 
-Run only the **Playground** sandbox:
-
-```bash
-docker compose up -d playground
-docker logs gimel-playground   # prints the generated demo login credentials
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/mxsp/gimel.git
+cd gimel
+.\scripts\setup.ps1
 ```
 
-Run only **Production** (with PostgreSQL 16):
-
+Then start Gimel:
 ```bash
-docker compose up -d postgres production
+.venv/bin/gimel playground                      # Demo sandbox on http://127.0.0.1:8040/app
+.venv/bin/gimel production                      # Clean production on http://127.0.0.1:8041/app
+.venv/bin/gimel production --host 0.0.0.0       # Share over your local LAN (localnet-only enforced)
 ```
 
-### 2. Standalone Executable (Linux Binary / Windows `.exe`)
+### Option 2: Standalone Executable (Linux Binary / Windows `.exe`)
 
-Build a self-contained single-file executable bundling the backend, all SPAs, and both modes:
-
-- **Linux:** `./packaging/build-exe.sh` → produces `packaging/dist/gimel`
-- **Windows (PowerShell):** `.\packaging\build-exe.ps1` → produces `packaging\dist\gimel.exe` + `.bat` launchers
+Download from [GitHub Releases](https://github.com/mxsp/gimel/releases) or build locally (`./packaging/build-exe.sh` on Linux, `.\packaging\build-exe.ps1` on Windows):
 
 ```bash
 ./packaging/dist/gimel --mode playground   # Sandbox on http://127.0.0.1:8040/app
@@ -53,26 +77,32 @@ Build a self-contained single-file executable bundling the backend, all SPAs, an
 ./packaging/dist/gimel --mode both         # Run both side by side
 ```
 
-### 3. Local Python + Node Development
+### Option 3: Docker Compose (Playground + Production + PostgreSQL)
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+cp .env.example .env
+# Edit .env to set POSTGRES_PASSWORD, GIMEL_SECRET_KEY, GIMEL_ADMIN_USER, and GIMEL_ADMIN_PASSWORD
+docker compose up -d --build
+```
 
-# Build frontend SPAs
-(cd web && npm ci && npm run build)
-(cd agentlab/web && npm ci && npm run build)
+- Playground: `http://127.0.0.1:8040/app` (`docker logs gimel-playground` prints demo credentials)
+- Production: `http://127.0.0.1:8041/app` (PostgreSQL 16)
 
-# Start Playground (auto-seeds Musterwerk GmbH into ~/.local/share/gimel/playground)
-.venv/bin/gimel playground
+---
 
-# Or start Production (clean DB in ~/.local/share/gimel/production)
-.venv/bin/gimel production --admin-user admin --admin-password "replace-with-strong-password"
+## Account Manager & Updates (CLI)
 
-# Manage local accounts (username + password)
-.venv/bin/gimel accounts list
-.venv/bin/gimel accounts add max --role staff
-.venv/bin/gimel accounts passwd max
+```bash
+# Manage local username + password accounts
+gimel accounts list
+gimel accounts add max --role staff
+gimel accounts passwd max
+gimel accounts role max admin
+gimel accounts disable max | enable max | unlock max | delete max
+
+# Check & apply updates from GitHub Releases (mxsp/gimel)
+gimel update --check
+gimel update --apply
 ```
 
 ---
@@ -80,40 +110,33 @@ python3 -m venv .venv
 ## Repository Layout
 
 ```text
-gimel/                FastAPI backend, planning core, SQLAlchemy models, launcher
+gimel/                FastAPI backend, planning core, localnet guard, account manager, updater
   core/               Pure planning & geometry: nesting (lite/kerf), routing, worklist, pricing
-  routers/            REST API endpoints (/api/...)
-  services/           Domain services, batch scheduler, security, settings store
-  modules.py          Composable module & semi-external app registry
+  routers/            REST API endpoints (/api/accounts, /api/updates, /api/orders, ...)
+  services/           Domain services, batch scheduler, GitHub Release updater, settings store
+  localnet.py         Localnet-only ASGI middleware (loopback + RFC1918 + ULA)
   launcher.py         Unified Playground & Production runner (CLI, Docker, EXE)
 web/                  React 18 + Blueprint 5 frontend (Portal /app, Twin /twin, Studio /studio)
 agentlab/             Optional AI assistant backend & frontend (/lab)
+scripts/              One-time setup scripts (setup.sh, setup.ps1)
 packaging/            PyInstaller spec and Linux/Windows executable build scripts
-docs/MODULARITY.md    Developer guide for adding internal features or semi-external apps
-tests/                Pytest backend & planning test suites
+docs/                 MANUAL.md, MODULARITY.md, and screenshots/
+tests/                Pytest backend, security, updater, and planning test suites
 ```
 
 ---
 
-## Extending Gimel
+## Documentation
 
-See [docs/MODULARITY.md](./docs/MODULARITY.md) for how to:
-1. Add new internal portal screens via `registerFeature(...)` (`web/src/modules/featureRegistry.ts`).
-2. Mount semi-external Python/Vite modules via `gimel.modules.register_module(...)` or `GIMEL_MODULE_IMPORTS`.
-3. Attach external web tools via `GIMEL_MODULES_FILE`.
-
----
-
-## Running Tests
-
-```bash
-.venv/bin/pytest tests/ -q
-cd web && node nav-groups.test.mjs && node jump.test.mjs && node areas.test.mjs ../gimel/webapp/dist
-```
+- [Installation & User Manual](./docs/MANUAL.md)
+- [Modularity & Extension Guide](./docs/MODULARITY.md)
+- [Security Policy](./SECURITY.md)
+- [Contributing](./CONTRIBUTING.md)
+- [Third-Party Licenses](./THIRD_PARTY_LICENSES.md)
 
 ---
 
 ## License
 
-Copyright (c) 2026 FyreFly Systems GbR / mxsp.
-Licensed under the **Gimel Non-Commercial Source License** — see [LICENSE](./LICENSE) and [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md).
+Copyright (c) 2026 FyreFly Systems GbR / mxsp.  
+Licensed under the **Gimel Non-Commercial Source License** — see [LICENSE](./LICENSE).
