@@ -7,7 +7,8 @@ import pytest
 from gimel.hostguard import HostGuardMiddleware, host_allowed, parse_allowed, split_host
 
 LOCAL = ["127.0.0.1:8001", "127.0.0.1", "localhost:8001", "LOCALHOST", "[::1]:8001", "[::1]", "10.0.2.15:8001",
-         "10.0.2.2:8001", "192.168.1.5", "testserver", "localhost.:8001", None, ""]
+         "10.0.2.2:8001", "192.168.1.5", "gimel.local:8040", "werkstatt.lan:8041", "box.home.arpa",
+         "testserver", "localhost.:8001", None, ""]
 REBIND = ["evil.example", "evil.example:8001", "127.0.0.1.evil.example", "localhost.evil.example",
           "attacker.test:8001", "127.0.0.1@evil.example", "evil.example#127.0.0.1", "a b"]
 

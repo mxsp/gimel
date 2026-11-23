@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import socket
 from collections.abc import Iterable
 
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -121,6 +122,38 @@ def request_is_localnet(scope: dict, extra: Iterable[IPNetwork] = ()) -> bool:
         if not is_localnet_ip(fwd, extra):
             return False
     return True
+
+
+def local_lan_ips() -> list[str]:
+    """Return non-loopback private IPv4 addresses on this machine for LAN banners."""
+    found: list[str] = []
+
+    def _add(raw: str) -> None:
+        try:
+            addr = ipaddress.ip_address(raw)
+        except ValueError:
+            return
+        if isinstance(addr, ipaddress.IPv4Address) and addr.is_private and not addr.is_loopback and not addr.is_link_local:
+            s = str(addr)
+            if s not in found:
+                found.append(s)
+
+    # Primary outbound LAN interface (UDP connect sends zero packets)
+    for target in (("10.255.255.255", 1), ("192.0.2.1", 80)):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.settimeout(0.2)
+                sock.connect(target)
+                _add(sock.getsockname()[0])
+        except OSError:
+            pass
+
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            _add(str(info[4][0]))
+    except OSError:
+        pass
+    return found
 
 
 class LocalnetGuardMiddleware:

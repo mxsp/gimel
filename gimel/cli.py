@@ -15,7 +15,8 @@ from sqlalchemy.engine import make_url
 
 from . import __version__
 
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
+LOCAL_ONLY_HOST = "127.0.0.1"
 PORT = 8040
 
 
@@ -140,14 +141,16 @@ def _serve(args: argparse.Namespace) -> int:
     if getattr(args, "voice", False):
         # Opt-in fürs Test-Portal: Spracherkennung auf diesem Rechner (task 43).
         os.environ["GIMEL_VOICE"] = "1"
+    from .localnet import local_lan_ips
+
     data = _init()
     host = args.host or HOST
     port = args.port or PORT
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/app"
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        print(f"WARNING: Gimel is reachable from other machines on {host}. "
-              "Put it behind HTTPS before anyone uses it over a network.", file=sys.stderr)
     print(f"Gimel {__version__} — {url}  (data: {data})")
+    if host in ("0.0.0.0", "::"):
+        for ip in local_lan_ips():
+            print(f"  LAN: http://{ip}:{port}/app  (localnet-only enforced)")
     if os.environ.get("GIMEL_VOICE") == "1":
         print("Spracherkennung an (GIMEL_VOICE=1) — nur fürs Test-Portal, nie mit Tunnel.")
     if not args.no_browser:
@@ -169,7 +172,7 @@ def _studio(args: argparse.Namespace) -> int:
               "mit diesem Datenordner starten.", file=sys.stderr)
         return 1
     data = _init()
-    host = args.host or HOST
+    host = args.host or LOCAL_ONLY_HOST
     port = args.port or STUDIO_PORT
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/studio/"
     if host not in ("127.0.0.1", "localhost", "::1"):
@@ -198,7 +201,7 @@ def _twin(args: argparse.Namespace) -> int:
               "mit diesem Datenordner starten.", file=sys.stderr)
         return 1
     data = _init()
-    host = args.host or HOST
+    host = args.host or LOCAL_ONLY_HOST
     port = args.port or TWIN_PORT
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/twin/"
     if host not in ("127.0.0.1", "localhost", "::1"):

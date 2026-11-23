@@ -21,6 +21,7 @@ import ipaddress
 from collections.abc import Iterable
 
 BUILTIN = ("localhost", "testserver")
+LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal")
 
 
 def split_host(value: str) -> str:
@@ -53,6 +54,8 @@ def host_allowed(header: str | None, extra: Iterable[str] = ()) -> bool:
     if not host:
         return False
     if host in BUILTIN or _is_ip(host):
+        return True
+    if any(host.endswith(suf) and len(host) > len(suf) for suf in LOCAL_SUFFIXES):
         return True
     for pattern in extra:
         if pattern == "*" or host == pattern:

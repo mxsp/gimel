@@ -27,7 +27,7 @@ from typing import Literal
 
 Mode = Literal["playground", "production", "both"]
 
-DEFAULT_HOST = "127.0.0.1"
+DEFAULT_HOST = "0.0.0.0"
 PLAYGROUND_PORT = 8040
 PRODUCTION_PORT = 8041
 
@@ -95,8 +95,6 @@ def _configure_env_before_import(
         _ensure_key_file(data_dir, "portal.token", "GIMEL_PORTAL_TOKEN")
         os.environ.setdefault("GIMEL_BOOTSTRAP_ADMIN_PASSWORD", "")
         os.environ.setdefault("GIMEL_MAIL_SILENT", "1")
-        if host in ("0.0.0.0", "::") and not os.environ.get("GIMEL_ALLOWED_HOSTS"):
-            os.environ["GIMEL_ALLOWED_HOSTS"] = "127.0.0.1,localhost,*"
 
 
 def _prepare_playground(data_dir: Path, reset: bool) -> tuple[str, str]:
@@ -200,11 +198,19 @@ def run_single(
     data_dir = _mode_data_dir(base_dir, mode)
     _configure_env_before_import(mode, data_dir, host)
 
+    from gimel.localnet import local_lan_ips
+
+    local_url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/app"
+    lan_urls = [f"http://{ip}:{port}/app" for ip in local_lan_ips()] if host in ("0.0.0.0", "::") else []
+
     if mode == "playground":
         email, password = _prepare_playground(data_dir, reset=reset)
         print("=" * 64)
         print("  GIMEL PLAYGROUND (Sandkasten · Musterwerk GmbH)")
-        print(f"  URL:      http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/app")
+        print(f"  Lokal:    {local_url}")
+        for lan_url in lan_urls:
+            print(f"  LAN:      {lan_url}")
+        print("  Netzwerk: Nur lokales Netzwerk (Localnet)")
         print(f"  Daten:    {data_dir}")
         print(f"  Login:    {email}")
         print(f"  Passwort: {password}")
@@ -215,16 +221,18 @@ def run_single(
             return rc
         print("=" * 64)
         print("  GIMEL PRODUCTION (Echtbetrieb)")
-        print(f"  URL:      http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/app")
+        print(f"  Lokal:    {local_url}")
+        for lan_url in lan_urls:
+            print(f"  LAN:      {lan_url}")
+        print("  Netzwerk: Nur lokales Netzwerk (Localnet)")
         print(f"  Daten:    {os.environ.get('GIMEL_DATABASE_URL') or data_dir}")
         print("=" * 64)
 
     import uvicorn
     from gimel.app import create_app
 
-    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/app"
     if not no_browser:
-        threading.Timer(1.3, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.3, lambda: webbrowser.open(local_url)).start()
 
     app = create_app()
     uvicorn.run(app, host=host, port=port, log_level="info", proxy_headers=(mode == "production"))
