@@ -21,6 +21,7 @@ import type { PreviewTab } from "./PreviewPane";
 import Proposals from "./Proposals";
 import Providers from "./Providers";
 import Routines from "./Routines";
+import SidebarUpdateButton from "./SidebarUpdateButton";
 import Stats from "./Stats";
 import Tools from "./Tools";
 
@@ -707,6 +708,7 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
           </div>
 
           <div className="lab-side-foot">
+            <SidebarUpdateButton isAdmin={user.role === "admin" || user.adminWork === true} />
             <Popover
               minimal
               position="top"

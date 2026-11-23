@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { SessionUser } from "./api";
 import AppSwitcher from "./components/AppSwitcher";
 import BotSmiley from "./components/BotSmiley";
+import SidebarUpdateButton from "./components/SidebarUpdateButton";
 import { showFirstStepsAgain } from "./components/FirstSteps";
 import KeyPopover from "./ui/KeyPopover";
 import { DENSITY_LABEL, Density, readDensity, setDensity } from "./ui/prefs";
@@ -130,6 +131,7 @@ export default function SideNavigation({ route, role, features, area, onArea, us
       )}
     </nav>
     <div className="rail-foot">
+      {user && <SidebarUpdateButton isAdmin={role === "admin"} />}
       {user && onLogout && (
         <KeyPopover
           minimal

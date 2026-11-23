@@ -9,6 +9,7 @@ import { toastError, toastInfo, toastSuccess } from "../toast";
 import GimelMark from "../components/GimelMark";
 import AppSwitcher from "../components/AppSwitcher";
 import BotSmiley from "../components/BotSmiley";
+import SidebarUpdateButton from "../components/SidebarUpdateButton";
 import ThemeSwitch from "../components/ThemeSwitch";
 import FloorPlan from "../components/FloorPlan";
 import IsoFloorPlan from "../components/twin/IsoFloorPlan";
@@ -1210,6 +1211,7 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
               <Icon icon="more" size={14} aria-hidden="true" />
             </button>
           </KeyPopover>
+          <SidebarUpdateButton isAdmin={canAdminWork(user)} />
           <AppSwitcher active="twin" />
         </div>
       </aside>
