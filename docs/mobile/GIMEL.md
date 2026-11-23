@@ -1,0 +1,1 @@
+/home/kali/Desktop/mxsp-all/gimel/docs/GIMEL.md

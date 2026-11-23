@@ -1,0 +1,105 @@
+/* Begehen in 3D — gemeinsam für Leitstand und Twin Studio (bis 2026-11-07 nur in
+   studio.css: im Leitstand standen Fadenkreuz, Ebenenschild, Aufzug und Fahrt ungestaltet). */
+.three-joy {
+  display: none; position: absolute; z-index: 6; width: 108px; height: 108px; margin: -54px 0 0 -54px;
+  border-radius: 50%; border: 2px solid rgb(var(--g-surface-rgb) / 0.9); background: rgb(0 0 0 / 0.16);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.25); pointer-events: none;
+}
+.three-joy > span {
+  position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%;
+  background: rgb(var(--g-surface-rgb) / 0.95); border: 2px solid var(--g-info); box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
+}
+/* --- Begehen wie im Spiel: Fadenkreuz, Hinweis, Ebenenwahl, Fahrt ---------- */
+.three-walk { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.three-cross {
+  position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
+  background: rgb(var(--g-surface-rgb) / 0.9); box-shadow: 0 0 0 1.5px rgb(0 0 0 / 0.55);
+}
+.three-walk-lock {
+  position: absolute; left: 50%; top: 14px; transform: translateX(-50%); padding: 5px 12px; border-radius: 999px;
+  font-size: 12.5px; background: rgb(var(--g-surface-rgb) / 0.94); color: var(--g-text-strong); border: 1px solid var(--g-rule);
+  white-space: nowrap; display: none;
+}
+@media (pointer: fine) { .three-walk-lock { display: block; } }
+.three-walk-edit {
+  position: absolute; right: 12px; top: 12px; display: inline-flex; align-items: center; gap: 6px;
+  pointer-events: auto; cursor: pointer; padding: 5px 11px; border-radius: 999px; font: inherit;
+  font-size: 12.5px; font-weight: 600; color: var(--g-text-strong); background: rgb(var(--g-surface-rgb) / 0.94);
+  border: 1px solid var(--g-rule);
+}
+.three-walk-edit:hover { border-color: var(--g-info); }
+.three-walk-edit[data-on="1"] {
+  background: var(--g-info); border-color: var(--g-info); color: #fff;
+}
+.three-walk-edit kbd, .three-walk-edit-hint kbd {
+  display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 3px; border-radius: 4px;
+  font: 600 10.5px var(--g-font-mono, monospace); background: rgb(0 0 0 / 0.16); color: inherit;
+}
+.three-walk-edit[data-on="1"] kbd { background: rgb(255 255 255 / 0.22); }
+.three-walk-edit-hint {
+  position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%); max-width: calc(100% - 24px);
+  padding: 7px 14px; border-radius: 999px; font-size: 12.5px; line-height: 1.5; text-align: center;
+  background: rgb(var(--g-surface-rgb) / 0.94); color: var(--g-text-strong); border: 1px solid var(--g-info);
+}
+.three-walk-edit-hint kbd { background: rgb(0 0 0 / 0.1); }
+.three-walk-level {
+  position: absolute; left: 12px; top: 12px; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+  border-radius: 999px; font-size: 12.5px; font-weight: 600; background: rgb(var(--g-surface-rgb) / 0.94);
+  color: var(--g-text-strong); border: 1px solid var(--g-rule);
+}
+.three-walk-prompt {
+  position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); pointer-events: auto; cursor: pointer;
+  padding: 9px 18px; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap;
+  background: var(--g-lift-sign-bg); color: var(--g-lift-sign-fg); border: 2px solid var(--g-lift-pad);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+}
+/* Die Treppe ist nur ein Hinweis, kein Knopf: man geht einfach hinein. */
+.three-walk-prompt[role="note"] { pointer-events: none; cursor: default; }
+.three-lift {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: auto; min-width: 260px; max-width: calc(100% - 24px);
+  padding: 12px 14px 10px; border-radius: var(--g-radius); background: var(--g-lift-sign-bg); color: var(--g-lift-sign-fg);
+  border: 2px solid var(--g-lift-pad); box-shadow: 0 10px 34px rgb(0 0 0 / 0.5);
+}
+.three-lift h3 { margin: 0 0 8px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; display: flex; gap: 6px; align-items: center; }
+.three-lift ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.three-lift button {
+  width: 100%; display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 10px; text-align: left;
+  min-height: 40px; padding: 6px 10px; border-radius: 6px; font: inherit; font-size: 15px; cursor: pointer;
+  color: inherit; background: rgb(255 255 255 / 0.07); border: 1px solid rgb(255 255 255 / 0.18);
+}
+.three-lift button[data-active="1"] { background: var(--g-lift-pad); border-color: var(--g-lift-pad); color: #fff; }
+.three-lift button[aria-current="true"] span::after { content: " ●"; font-size: 10px; }
+.three-lift kbd {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; font: 600 12px var(--g-font-mono, monospace);
+  background: rgb(255 255 255 / 0.16); color: inherit;
+}
+.three-lift small { opacity: 0.8; font-size: 12px; }
+.three-lift p { margin: 8px 0 0; font-size: 11.5px; opacity: 0.75; }
+.three-ride { position: absolute; inset: 0; display: grid; place-items: center; background: #000; color: #fff; font-size: 17px; letter-spacing: 0.03em; }
+.three-ride[data-phase="out"] { animation: three-ride-out 0.42s ease-out forwards; }
+.three-ride[data-phase="in"] { animation: three-ride-in 0.5s ease-in forwards; }
+@keyframes three-ride-out { from { opacity: 0; } to { opacity: 1; } }
+@keyframes three-ride-in { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .three-ride[data-phase="out"], .three-ride[data-phase="in"] { animation-duration: 0.01s; }
+}
+/* Rechtsklick-Menü und Tastenkürzel beim Begehen (2026-11-07). */
+.three-ctx {
+  position: absolute; z-index: 8; pointer-events: auto; min-width: 230px; max-height: calc(100% - 16px); overflow: auto; border-radius: var(--g-radius);
+  background: var(--g-surface, #fff); border: 1px solid var(--g-rule); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+.three-ctx .bp5-menu { background: transparent; }
+.three-walk-help {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 8; pointer-events: auto;
+  width: min(440px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; padding: 14px 16px 12px;
+  border-radius: var(--g-radius); background: rgb(var(--g-surface-rgb) / 0.97); color: var(--g-text-strong);
+  border: 1px solid var(--g-rule); box-shadow: 0 10px 34px rgb(0 0 0 / 0.4);
+}
+.three-walk-help h3 { margin: 0 0 10px; font-size: 14px; }
+.three-walk-help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0 0 12px; font-size: 13px; }
+.three-walk-help dt { white-space: nowrap; color: var(--g-text-muted, inherit); }
+.three-walk-help dd { margin: 0; }
+.three-walk-help kbd {
+  display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 4px; margin-right: 2px; border-radius: 4px;
+  font: 600 11px var(--g-font-mono, monospace); background: rgb(0 0 0 / 0.08); border: 1px solid var(--g-rule);
+}

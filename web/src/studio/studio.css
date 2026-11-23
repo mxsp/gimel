@@ -1,0 +1,424 @@
+@import "../unified-sidebar.css";
+
+/* Twin Studio — eine Seite, die ganz dem Zwilling gehört.
+   Raster: Kopf / (Aufbau | Bühne | Station) / Zeit. Farben nur aus den Tokens,
+   damit hell und dunkel ohne eigene Werte stimmen. */
+
+html, body.studio-body { height: 100%; }
+body.studio-body { margin: 0; background: var(--g-bg); color: var(--g-text); overflow: hidden; }
+
+.studio-login { background: var(--g-bg); }
+
+.studio {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 0 auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "banner banner banner banner"
+    "bar    bar    bar    bar"
+    "left   stage  right  copilot"
+    "time   time   time   copilot";
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+}
+.studio > .demo-banner { grid-area: banner; }
+.studio-copilot { grid-area: copilot; min-height: 0; display: flex; }
+.studio.studio-has-inspector { grid-template-columns: 320px minmax(0, 1fr) 340px auto; }
+.studio.studio-left-closed { grid-template-columns: 0 minmax(0, 1fr) 0 auto; }
+.studio.studio-left-closed.studio-has-inspector { grid-template-columns: 0 minmax(0, 1fr) 340px auto; }
+.studio.studio-kiosk, .studio.studio-kiosk.studio-has-inspector,
+.studio.studio-kiosk.studio-left-closed, .studio.studio-kiosk.studio-left-closed.studio-has-inspector { grid-template-columns: 0 minmax(0, 1fr) 0 0; }
+.studio-kiosk .three-hud { display: none; }
+
+/* --- Kopf ------------------------------------------------------------------ */
+.studio-bar {
+  grid-area: bar;
+  display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+  padding: 5px 10px;
+  background: var(--g-chrome, var(--g-surface));
+  border-bottom: 1px solid var(--g-rule);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.studio-bar::-webkit-scrollbar { display: none; }
+.studio-bar > * { flex-shrink: 0; }
+.studio-brand { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; margin-right: 2px; white-space: nowrap; }
+.studio-bar-gap { flex: 1 1 auto; min-width: 4px; }
+.studio-floor select { max-width: 185px; }
+.studio-who { display: inline-block; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.studio-layer-menu { min-width: 280px; }
+.studio-layer { list-style: none; padding: 2px 8px; }
+.studio-layer .bp5-control { margin: 4px 0; }
+
+/* --- Aufbau ---------------------------------------------------------------- */
+.studio-left {
+  grid-area: left;
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  border-right: 1px solid var(--g-rule);
+  background: var(--g-surface);
+  overflow: hidden;
+}
+.studio-left[hidden] { display: none; }
+.studio-left-head { padding: 10px; border-bottom: 1px solid var(--g-rule-soft, var(--g-rule)); }
+.studio-summary { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 10px; font-size: 12px; color: var(--g-text-2); }
+.studio-stations { list-style: none; margin: 0; padding: 0 6px 8px; overflow-y: auto; flex: 1 1 auto; }
+.studio-station {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 44px; padding: 6px 8px; margin: 1px 0;
+  border: 1px solid transparent; border-radius: var(--g-radius);
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.studio-station:hover { background: var(--g-surface-2); }
+.studio-station:focus-visible { outline: 2px solid var(--g-info); outline-offset: 1px; }
+.studio-station.is-selected { background: var(--g-info-soft); border-color: var(--g-info); }
+.studio-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--g-faint); box-shadow: 0 0 0 2px var(--g-surface); }
+.studio-station[data-kind="ueber"] .studio-dot { background: var(--g-danger); }
+.studio-station[data-kind="voll"] .studio-dot { background: var(--g-warning); }
+.studio-station[data-kind="laeuft"] .studio-dot { background: var(--g-success); }
+.studio-station[data-kind="wartet"] .studio-dot { background: var(--g-info); }
+.studio-station[data-kind="frei"] .studio-dot { background: var(--g-success-soft); border: 1px solid var(--g-success); }
+.studio-station[data-kind="inaktiv"] .studio-station-name, .studio-station[data-kind="inaktiv"] .studio-station-sub { color: var(--g-muted); }
+.studio-station[data-kind="inaktiv"] .studio-dot { background: none; border: 1px dashed var(--g-muted); }
+.studio-station-main { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.studio-station-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-station-sub { font-size: 12px; color: var(--g-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-station-q {
+  flex: none; min-width: 24px; padding: 1px 6px; border-radius: 10px; text-align: center; font-size: 12px;
+  background: var(--g-surface-3, var(--g-surface-2)); color: var(--g-text-strong);
+}
+.studio-empty { padding: 14px 8px; color: var(--g-muted); font-size: 13px; }
+.studio-left-foot { margin: 0; padding: 8px 10px 10px; font-size: 11px; line-height: 1.4; color: var(--g-muted); border-top: 1px solid var(--g-rule-soft, var(--g-rule)); }
+
+/* --- Bühne ----------------------------------------------------------------- */
+.studio-stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--g-floor-outside); }
+.studio-stage .iso-hud, .studio-stage .three-hud { max-width: calc(100% - 228px); }
+.studio-stage > .floor-card { height: 100%; border: 0; border-radius: 0; }
+.studio-center { display: grid; place-items: center; height: 100%; color: var(--g-muted); }
+.studio-hint {
+  position: absolute; left: 12px; right: 12px; bottom: 14px; margin-inline: auto;
+  width: max-content; max-width: calc(100% - 24px);
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; border-radius: 999px; font-size: 13px;
+  background: rgb(var(--g-surface-rgb) / 0.94); color: var(--g-text-strong);
+  border: 1px solid var(--g-rule); box-shadow: var(--g-elev-2, 0 4px 14px rgba(0,0,0,.18));
+  z-index: 5; pointer-events: none;
+}
+
+/* Beschriftungen der Datenebene und des Maßbands in der 3D-Szene. */
+.three-measure-seg, .three-measure-total {
+  display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; line-height: 1.3;
+  white-space: nowrap; font-family: var(--g-font-mono, monospace);
+  background: rgb(var(--g-surface-rgb) / 0.92); color: var(--g-text-strong);
+  border: 1px solid var(--g-rule);
+}
+.three-measure-total { font-weight: 700; border-color: var(--g-info); color: var(--g-info-ink, var(--g-info)); }
+
+/* --- Station rechts -------------------------------------------------------- */
+.studio-right {
+  grid-area: right; min-width: 0; min-height: 0; overflow-y: auto;
+  border-left: 1px solid var(--g-rule); background: var(--g-surface); padding: 10px;
+}
+.studio-forecast-note { font-size: 12px; color: var(--g-warning-ink); display: flex; gap: 6px; align-items: center; }
+
+/* --- Zeit ------------------------------------------------------------------ */
+.studio-time {
+  grid-area: time;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 10px; border-top: 1px solid var(--g-rule);
+  background: var(--g-chrome, var(--g-surface));
+}
+.studio-steps { display: flex; gap: 4px; flex: 1 1 420px; min-width: 0; }
+.studio-step {
+  flex: 1 1 0; min-width: 0; min-height: 44px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  padding: 4px 10px; border: 1px solid var(--g-rule); border-radius: var(--g-radius);
+  background: var(--g-surface); color: inherit; font: inherit; cursor: pointer; text-align: left;
+}
+.studio-step:hover:not(:disabled) { background: var(--g-surface-2); }
+.studio-step:focus-visible { outline: 2px solid var(--g-info); outline-offset: 1px; }
+.studio-step.is-on { border-color: var(--g-info); background: var(--g-info-soft); }
+.studio-step:disabled { opacity: 0.5; cursor: not-allowed; }
+.studio-step-label { font-weight: 600; font-size: 13px; }
+.studio-step-val { font-size: 11px; color: var(--g-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.studio-time-note { font-size: 12px; color: var(--g-text-2); display: inline-flex; align-items: center; gap: 6px; }
+.studio-stand { font-size: 12px; color: var(--g-muted); }
+
+/* --- Hallenbildschirm ------------------------------------------------------ */
+.studio-kiosk .studio-stage { grid-row: 2 / 5; }
+.studio-kiosk-head {
+  position: absolute; top: 12px; left: 12px; right: 12px; z-index: 6;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 12px; border-radius: var(--g-radius); font-size: 15px;
+  background: rgb(var(--g-surface-rgb) / 0.92); color: var(--g-text-strong);
+  border: 1px solid var(--g-rule); box-shadow: var(--g-elev-2, 0 4px 14px rgba(0,0,0,.18));
+}
+.studio-kiosk-head > span { color: var(--g-text-2); font-size: 13px; }
+.studio-kiosk-head > .bp5-button { margin-left: auto; }
+.studio-kiosk-card {
+  position: absolute; right: 16px; bottom: 64px; z-index: 6;
+  display: flex; flex-direction: column; gap: 2px; min-width: 200px;
+  padding: 10px 14px; border-radius: var(--g-radius); font-size: 15px;
+  background: rgb(var(--g-surface-rgb) / 0.94); border: 1px solid var(--g-rule);
+}
+.studio-kiosk-card > span { font-size: 13px; color: var(--g-text-2); }
+
+/* --- Schmal ---------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .studio, .studio.studio-has-inspector, .studio.studio-left-closed, .studio.studio-left-closed.studio-has-inspector {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "banner" "bar" "stage" "time";
+  }
+  .studio-left, .studio-right {
+    position: fixed; z-index: 20; top: 0; bottom: 0; width: min(88vw, 340px);
+    box-shadow: var(--g-elev-2, 0 6px 24px rgba(0,0,0,.25));
+  }
+  .studio-left { left: 0; }
+  .studio-right { right: 0; }
+  .studio-bar { gap: 4px; padding: 4px 6px; }
+  .studio-brand b { display: none; }
+  .studio-tools .bp5-button-text, .studio-bar .bp5-popover-target .bp5-button-text { display: none; }
+  .studio-floor select { max-width: 150px; }
+  /* Am Telefon zählt die Bühne: Darstellung, Hallenbildschirm, Vollbild und
+     Thema treten zurück; „Schnell" bleibt die Vorgabe. */
+  .studio-quality, .studio-kiosk-btn, .studio-full-btn, .studio-bar .theme-switch { display: none; }
+  .studio-who { display: none; }
+  .studio-steps { flex: 1 1 0; }
+  .studio-bar .bp5-button, .studio-bar select { min-height: 44px; min-width: 44px; }
+  .studio-time-note, .studio-stand { display: none; }
+  .studio-step-val { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-step, .studio-station { transition: none; }
+}
+
+/* Mittlere Breite: Werkzeuge nur als Symbol, damit der Kopf einzeilig bleibt. */
+@media (max-width: 1500px) and (min-width: 901px) {
+  .studio-tools .bp5-button-text { display: none; }
+  .studio-who { display: none; }
+}
+@media (max-width: 1360px) and (min-width: 901px) {
+  .studio-brand b { display: none; }
+  .studio-floor select { max-width: 155px; }
+}
+.studio-hint > span { min-width: 0; }
+.studio-scrim { position: fixed; inset: 0; z-index: 19; border: 0; padding: 0; background: rgba(0, 0, 0, 0.32); cursor: pointer; }
+
+/* --- Simulation geplanter Roboter ------------------------------------------ */
+.studio.studio-sim-tab { grid-template-columns: 380px minmax(0, 1fr) 0 auto; }
+.studio.studio-sim-tab.studio-has-inspector { grid-template-columns: 380px minmax(0, 1fr) 340px auto; }
+.studio.studio-sim-tab.studio-left-closed { grid-template-columns: 0 minmax(0, 1fr) 0 auto; }
+.studio-tabs { display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--g-rule-soft, var(--g-rule)); }
+.studio-tabs .bp5-button { flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 4px 6px; font-size: 12px; white-space: nowrap; border-radius: var(--g-radius) var(--g-radius) 0 0; }
+.studio-tabs .bp5-button .bp5-icon { margin-right: 4px; flex-shrink: 0; }
+.studio-tabs .bp5-button[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--g-info); }
+.studio-sim-scroll { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.sim-panel { padding: 10px; display: flex; flex-direction: column; gap: 14px; }
+.sim-note { font-size: 12px; }
+.sim-section h3 { font-size: 13px; margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
+.sim-section h4 { font-size: 12px; margin: 10px 0 6px; color: var(--g-text-2); }
+.sim-robot { display: grid; grid-template-columns: minmax(0, 1fr) 70px 46px 82px 30px; gap: 6px; align-items: center; margin-bottom: 6px; }
+.sim-robot .bp5-input-group, .sim-robot .bp5-numeric-input, .sim-robot .bp5-html-select { min-width: 0; }
+.sim-robot .bp5-numeric-input .bp5-input-group { width: 100%; }
+.sim-unit { display: inline-block; padding: 7px 6px 0 0; font-size: 11px; color: var(--g-muted); }
+.sim-switch { margin-top: 8px; }
+.sim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.sim-grid .bp5-form-group { margin-bottom: 8px; }
+.sim-grid .bp5-form-helper-text { font-size: 11px; line-height: 1.35; }
+.sim-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.sim-muted { font-size: 12px; color: var(--g-muted); margin: 6px 0 0; }
+.sim-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.sim-kpis > div { padding: 6px 8px; border: 1px solid var(--g-rule); border-radius: var(--g-radius); background: var(--g-surface-2); }
+.sim-kpis dt { font-size: 11px; color: var(--g-text-2); }
+.sim-kpis dd { margin: 0; font-size: 15px; font-weight: 700; font-family: var(--g-font-mono, monospace); color: var(--g-text-strong); }
+.sim-kpis .is-bad { border-color: var(--g-danger); }
+.sim-kpis .is-bad dd { color: var(--g-danger-ink); }
+.sim-kpis .is-good { border-color: var(--g-success); }
+.sim-kpis .is-warn { border-color: var(--g-warning); }
+.sim-robots { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.sim-robots li { display: grid; grid-template-columns: minmax(0, 1fr) 90px auto; gap: 8px; align-items: center; font-size: 12px; }
+.sim-robot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-tag { margin-left: 4px; }
+.sim-bar { display: block; height: 8px; border-radius: 4px; background: var(--g-track, var(--g-surface-3)); overflow: hidden; }
+.sim-bar > span { display: block; height: 100%; background: var(--g-info); }
+.sim-bar > span[data-hot] { background: var(--g-warning); }
+.sim-robot-num { font-size: 11px; color: var(--g-text-2); white-space: nowrap; }
+.sim-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sim-table th, .sim-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--g-rule-soft, var(--g-rule)); }
+.sim-table th { color: var(--g-text-2); font-weight: 600; }
+.sim-table tr.is-pick td { background: var(--g-success-soft); font-weight: 600; }
+.sim-notes { margin: 8px 0 0; padding-left: 16px; font-size: 11px; color: var(--g-muted); }
+.sim-save { display: flex; gap: 6px; margin-bottom: 8px; }
+.sim-save .bp5-input-group { flex: 1 1 auto; }
+.sim-scenarios { padding: 0; }
+
+.studio-sim-banner {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-size: 13px;
+  background: rgb(var(--g-surface-rgb) / 0.94); color: var(--g-text-strong);
+  border: 1px solid var(--g-sim); box-shadow: var(--g-elev-2, 0 4px 14px rgba(0,0,0,.18));
+}
+.studio-sim-banner .bp5-icon { color: var(--g-sim); }
+.studio-sim-banner span { color: var(--g-text-2); }
+.studio-sim-time { gap: 10px; }
+.studio-sim-range { flex: 1 1 260px; min-width: 120px; accent-color: var(--g-sim); height: 28px; }
+.three-sim-label, .three-sim-hotspot {
+  display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap;
+  background: rgb(var(--g-surface-rgb) / 0.94); color: var(--g-text-strong); border: 1px solid var(--g-rule);
+}
+.three-sim-label.is-planned { border: 1px dashed var(--g-sim); }
+.three-sim-label[data-state="beladen"] { border-style: solid; }
+.three-sim-hotspot { border-color: var(--g-danger); color: var(--g-danger-ink); font-weight: 600; }
+@media (max-width: 900px) {
+  .studio.studio-sim-tab, .studio.studio-sim-tab.studio-has-inspector, .studio.studio-sim-tab.studio-left-closed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .studio-left { width: min(94vw, 420px); }
+  .studio-sim-banner { left: 12px; right: 12px; transform: none; justify-content: center; }
+}
+
+/* --- Bearbeiten und Wege -------------------------------------------------- */
+.studio-edit {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--g-bg);
+  padding: 8px 10px;
+}
+.studio-edit .hall-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.studio-edit .editor-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  align-items: stretch;
+}
+.studio-edit .editor-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+.studio-edit .editor-rail {
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.studio-editing .studio-stage { background: var(--g-bg); }
+.route-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.route-list > li { border: 1px solid var(--g-rule); border-radius: var(--g-radius); padding: 8px 10px; background: var(--g-surface); }
+.route-list > li.is-open { border-color: var(--g-info); }
+.route-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+.route-metres { margin: 2px 0 4px; font-size: 12px; color: var(--g-text-strong); }
+.route-problem { margin: 2px 0; font-size: 12px; color: var(--g-danger-ink); }
+.route-list .bp5-button { margin-top: 6px; }
+
+/* --- Begehen: Steuerknüppel und Ablegen der Figur ------------------------- */
+/* Begehen-Oberfläche (Fadenkreuz, Hinweise, Aufzug, Fahrt, Menü): components/twin/walk.css */
+.studio-stage.is-drop { outline: 3px dashed var(--g-info); outline-offset: -6px; }
+.studio-tools .bp5-button[draggable="true"] { cursor: grab; }
+.studio-cam {
+  position: absolute; right: 12px; bottom: 60px; z-index: 5; display: flex; flex-direction: column; gap: 2px;
+  padding: 3px; border-radius: var(--g-radius); background: rgb(var(--g-surface-rgb) / 0.94);
+  border: 1px solid var(--g-rule); box-shadow: var(--g-elev-1, 0 2px 6px rgba(0,0,0,.15));
+}
+.studio-cam .bp5-button { min-width: 32px; min-height: 32px; }
+.studio-sim-banner ~ .studio-cam { top: auto; }
+@media (max-width: 900px) { .studio-cam { bottom: 64px; } .studio-cam .bp5-button { min-width: 44px; min-height: 44px; } }
+
+/* Vorführung: Bildtext je Halt (task 41 E). */
+/* Gate task 41: oben statt unten — unten deckte der Bildtext Kameraknöpfe,
+   Maßstab, Karte/Luftbild und den Hinweis „Belebung dargestellt“ zu. Rechts
+   bleibt Platz für die Minikarte. */
+.studio-caption {
+  position: absolute; left: 12px; right: 224px; top: 52px; margin-inline: auto;
+  width: min(560px, calc(100% - 236px));
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 12px 10px 14px; border-radius: var(--g-radius-lg, 8px);
+  background: rgb(var(--g-surface-rgb) / 0.96); color: var(--g-text);
+  border: 1px solid var(--g-rule); box-shadow: var(--g-elev-2, 0 4px 14px rgba(0,0,0,.18));
+  z-index: 6;
+}
+.studio-caption-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.studio-caption-text b { font-size: 15px; color: var(--g-text-strong); }
+.studio-caption-text > span { font-size: 13px; color: var(--g-text-2); font-variant-numeric: tabular-nums; }
+.studio-caption-text p { margin: 4px 0 0; font-size: 13px; line-height: 1.4; }
+.studio-caption-step { font-size: 11px !important; letter-spacing: 0.02em; color: var(--g-muted) !important; }
+.studio-caption-actions { display: flex; gap: 2px; flex: none; }
+
+/* Minikarte (task 41 E): Draufsicht der aktiven Ebene oben rechts. */
+.studio-minimap {
+  position: absolute; top: 12px; right: 12px; width: 200px; height: 140px; z-index: 4;
+  padding: 6px; border-radius: var(--g-radius-lg, 8px);
+  background: rgb(var(--g-surface-rgb) / 0.92); border: 1px solid var(--g-rule);
+  box-shadow: var(--g-elev-1, 0 1px 4px rgba(0,0,0,.14));
+}
+.studio-minimap svg { width: 100%; height: 100%; display: block; cursor: crosshair; }
+.studio-minimap-hall { fill: var(--g-floor, var(--g-surface-2)); stroke: var(--g-text-2); stroke-width: 0.35; vector-effect: non-scaling-stroke; }
+.studio-minimap-station { stroke: var(--g-surface); stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; opacity: 0.9; }
+.studio-minimap-station.is-off { opacity: 0.35; }
+.studio-minimap-station.is-selected { stroke: var(--g-text-strong); stroke-width: 2.5; opacity: 1; }
+.studio-minimap-me circle { fill: var(--g-text-strong); stroke: var(--g-surface); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.studio-minimap-me line { stroke: var(--g-text-strong); stroke-linecap: round; }
+.studio-minimap-me.is-walk circle { fill: var(--gimel-accent); }
+@media (max-width: 900px) {
+  .studio-minimap { display: none; }
+  .studio-caption { right: 12px; width: calc(100% - 24px); top: 48px; }
+  /* Während der Vorführung führt sie die Kamera; auf dem Telefon wäre neben
+     dem Bildtext kein Platz für die Kameraknöpfe. */
+  .studio-stage:has(.studio-caption) .studio-cam { display: none; }
+}
+
+/* Hinweis in der Experimentierhalle: hier steht der 7-Achs-Arm, von hier
+   geht es ins Portal zur Sortierzelle (Roboter → Arme & Zellen). */
+.studio-cell-callout {
+  position: absolute; left: 12px; top: 12px; z-index: 7;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  max-width: min(520px, calc(100% - 24px));
+  padding: 7px 8px 7px 12px; border-radius: var(--g-radius-lg, 8px);
+  background: rgb(var(--g-surface-rgb) / 0.96); color: var(--g-text);
+  border: 1px solid var(--g-rule); box-shadow: var(--g-elev-2, 0 4px 14px rgba(0,0,0,.18));
+}
+.studio-cell-callout > span { flex: 1 1 auto; min-width: 0; font-size: 12px; }
+.studio-cell-callout b { color: var(--g-text-strong); }
+@media (max-width: 700px) { .studio-cell-callout { display: none; } }
+
+/* --- Erweiterungen: Filterchips, Befunde, Linsen, Vergleich & Minikarte --- */
+.studio-filter-chips { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; }
+.studio-other-head {
+  padding: 8px 10px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--g-muted); border-top: 1px solid var(--g-rule-soft); margin-top: 4px;
+}
+.studio-station.is-other-floor { opacity: 0.85; }
+.studio-lenses { display: inline-flex; gap: 2px; padding-left: 8px; border-left: 1px solid var(--g-rule-soft); }
+
+.analysis-panel { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+.analysis-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.analysis-filters { display: flex; gap: 2px; flex-wrap: wrap; }
+.analysis-empty { display: flex; justify-content: center; padding: 24px 0; }
+.analysis-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.analysis-card {
+  padding: 8px 10px; border-radius: var(--g-radius); border: 1px solid var(--g-rule);
+  background: var(--g-surface); display: flex; flex-direction: column; gap: 4px; font-size: 12px;
+}
+.analysis-card.is-danger { border-left: 3px solid var(--g-danger); }
+.analysis-card.is-warning { border-left: 3px solid var(--g-warning); }
+.analysis-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.analysis-card p { margin: 0; color: var(--g-text-2); line-height: 1.4; }
+.analysis-metric { font-size: 11px; color: var(--g-muted); }
+.analysis-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 2px; }
+
+.sim-result-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.sim-result-head h3 { margin: 0; }
+.sim-result-tools { display: flex; align-items: center; gap: 2px; }
+.sim-baseline-note { margin: 0 0 8px; font-size: 11.5px; color: var(--g-text-2); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+.studio-minimap-aisle { stroke: var(--g-floor-aisle, var(--g-rule)); stroke-width: 1; opacity: 0.45; vector-effect: non-scaling-stroke; }
+.studio-minimap-conveyor { fill: none; stroke: var(--g-info); stroke-width: 2; opacity: 0.85; vector-effect: non-scaling-stroke; }
+.studio-minimap-robot { fill: var(--g-sim); stroke: var(--g-surface); stroke-width: 1; vector-effect: non-scaling-stroke; }

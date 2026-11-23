@@ -1,0 +1,64 @@
+/* Himmel hinter der 3D-Halle (Digitaler Zwilling), task: Tag/Nacht.
+   Liegt als erstes Kind der .three-stage hinter dem durchsichtigen
+   WebGL-Canvas: data-theme schaltet Nacht und Tag ohne JavaScript um.
+   Keine Farben aus Tokens — ein Himmel ist derselbe, egal welche
+   Oberflächenfarben das Theme der Halle gerade vorgibt.
+   Nacht: dunkler Himmel; die Sterne zeichnet die Szene selbst.
+   Tag: blauer Himmel mit leichten Wolken. */
+
+.twin-sky {
+  position: absolute; inset: 0; z-index: 0; overflow: hidden;
+  pointer-events: none; user-select: none;
+}
+.twin-sky-night, .twin-sky-day {
+  position: absolute; inset: 0; opacity: 0;
+  transition: opacity 550ms ease;
+}
+/* Standard ist hell (theme.ts setzt data-theme vor dem ersten Rendern). */
+.twin-sky-day { opacity: 1; }
+:root[data-theme="dark"] .twin-sky-night { opacity: 1; }
+:root[data-theme="dark"] .twin-sky-day { opacity: 0; }
+/* Was gerade nicht zu sehen ist, soll auch nicht im Hintergrund weiterlaufen. */
+:root[data-theme="light"] .twin-sky-night *,
+:root[data-theme="dark"] .twin-sky-day *,
+:root:not([data-theme]) .twin-sky-night * { animation-play-state: paused; }
+
+/* --- Nacht: dunkler Himmel (Sterne kommen aus der Szene) ------------------ */
+
+.twin-sky-night {
+  background:
+    linear-gradient(180deg, transparent 56%, rgba(32, 44, 74, 0.38) 100%),
+    linear-gradient(180deg, #04060e 0%, #080d1e 32%, #0e1530 62%, #16203a 84%, #1b2438 100%);
+}
+
+/* --- Tag: blauer Himmel, leichte Wolken ---------------------------------- */
+
+.twin-sky-day {
+  background:
+    linear-gradient(180deg, transparent 60%, rgba(255, 255, 255, 0.28) 100%),
+    linear-gradient(180deg, #3f86cf 0%, #5fa6e2 30%, #8ec3ee 58%, #bcd9f2 82%, #dbe9f5 100%);
+}
+.twin-sky-clouds { position: absolute; inset: 0; }
+.twin-sky-cloud {
+  position: absolute; width: 170px; height: 46px; opacity: 0.8;
+  transform: translate(-50%, -50%) scale(var(--twin-cloud-scale, 1));
+  background:
+    radial-gradient(ellipse 40% 72% at 25% 66%, rgba(255, 255, 255, 0.95), transparent 72%),
+    radial-gradient(ellipse 38% 88% at 51% 46%, rgba(255, 255, 255, 0.95), transparent 72%),
+    radial-gradient(ellipse 36% 66% at 76% 68%, rgba(255, 255, 255, 0.9), transparent 72%);
+  filter: blur(2px);
+  animation: twin-cloud-drift var(--twin-cloud-duration, 90s) linear infinite;
+}
+@keyframes twin-cloud-drift {
+  from { transform: translate(-90%, -50%) scale(var(--twin-cloud-scale, 1)); }
+  to { transform: translate(-10%, -50%) scale(var(--twin-cloud-scale, 1)); }
+}
+
+/* --- Rücksicht auf Gerät und Einstellung -------------------------------- */
+
+/* Schwache Geräte: das Bild bleibt, nur die Bewegung entfällt. */
+.three-stage[data-tier="schwach"] .twin-sky-cloud { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .twin-sky-night, .twin-sky-day { transition: none; }
+  .twin-sky-cloud { animation: none; }
+}

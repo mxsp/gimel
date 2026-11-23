@@ -1,0 +1,62 @@
+/* Gimel — erster UI-Pass nach den Vercel-Designrichtlinien (vercel-design.md).
+   Geladen nur vom Portal-Eingang src/main.tsx: Twin Studio (src/studio) und der
+   Assistent aus agentlab bleiben unverändert. Grundlage sind die byte-identische
+   Foundation public/assets/vercel-brand.css und die lokal gehosteten Geist-
+   Schriften, beide in index.html verlinkt.
+
+   Die Datei ergänzt nur die bestehenden --g-*-Tokens. Sie führt kein zweites
+   Farbsystem ein, ändert keine .vbg-*-Klasse und fügt keine Flächen, Kanten,
+   Icons oder Effekte hinzu. Die :root-Selektoren haben genug Spezifität, damit
+   auch später nachgeladene Seiten-CSS die Regeln nicht wieder überschreibt. */
+
+:root {
+  /* Geist Sans für Fließtext, Überschriften, Beschriftungen, Steuerelemente,
+     Tabellen und Werte. Geist Mono nur für Zahlen, Maße, IDs und Kurzkennungen
+     (Richtlinie: "Use Geist Mono only for code, commands, paths, raw tokens,
+     timestamps, and short operational identifiers"). Systemschriften bleiben
+     als Fallback, damit nichts ausfällt, solange die Dateien noch laden. */
+  --g-font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", sans-serif;
+  --g-font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --g-font: var(--g-font-sans); /* styles.css verwendet diesen Namen im Grundriss. */
+}
+
+:root body {
+  font-family: var(--g-font-sans);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Blueprints eigene Mono-Regeln auf Geist Mono umstellen. */
+:root :is(.bp5-monospace-text, .bp5-code, .bp5-code-block,
+          .bp5-running-text code, .bp5-running-text pre, kbd, code, pre) {
+  font-family: var(--g-font-mono);
+}
+
+/* Ausgerichtete Vergleiche brauchen feste Ziffernbreiten. Die font-Kurzform
+   einiger Bausteine setzt font-variant zurück, deshalb hier ausdrücklich. */
+:root :is(.data-table td.num, .data-table th.num, td.num, th.num,
+          .stat-value, .stat-card .stat-value, .heute-count, .fn-stat .v,
+          .ui-kpi-value, .flow-kpi b, .leitstand-kpi b, .sidebar-group-count,
+          .rank-score) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keine Großbuchstaben-Kicker, Overlines oder gesperrten Etiketten: Satzfall
+   und normale Laufweite, Hierarchie über Typografie statt über Sperrung.
+   Der Block "Aufgabe 35/41" am Ende von styles.css macht das schon für viele
+   Klassen; hier folgen die übrigen Schalen-, Tabellen- und Abschnittstitel. */
+:root :is(.bp5-html-table.data-table th,
+          a.area-switch-link,
+          .side-kicker,
+          .side-body :is(h2, h3, h4),
+          .addr-head,
+          .sl-subhead,
+          .rank-sep,
+          .aging-title,
+          .station-drawer .files-sub,
+          .fn-sec h2,
+          .fn-part-head) {
+  text-transform: none;
+  letter-spacing: 0;
+}

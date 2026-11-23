@@ -1,0 +1,31 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+web/node_modules/
+web-twin/node_modules/
+agentlab/web/node_modules/
+*.db
+*.db-wal
+*.db-shm
+*.bak
+.data/
+.env
+.pytest_cache/
+.code-review-graph/
+
+# Built SPA bundles (built in CI / Docker / packaging scripts)
+gimel/webapp/dist/
+gimel/studio/dist/
+gimel/twin/dist/
+gimel/scm_webapp/
+agentlab/webapp/dist/
+
+# Standalone executable build output
+packaging/build/
+packaging/dist/
+
+# MediaPipe models & WASM (~14 MB, fetched locally)
+web/public/mediapipe/

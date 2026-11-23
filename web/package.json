@@ -1,0 +1,35 @@
+{
+  "name": "gimel-web",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Internes Portal (Auftragsbüro, Produktion, Versand, Buchhaltung) — React + Blueprint",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && vite build -c vite.studio.config.ts && vite build -c vite.twin.config.ts",
+    "preview": "vite preview",
+    "dev:studio": "vite -c vite.studio.config.ts",
+    "dev:twin": "vite -c vite.twin.config.ts",
+    "prebuild": "node scripts/mediapipe-assets.mjs",
+    "predev": "node scripts/mediapipe-assets.mjs",
+    "mediapipe:models": "node scripts/mediapipe-assets.mjs --models"
+  },
+  "dependencies": {
+    "@blueprintjs/core": "^5.17.0",
+    "@blueprintjs/icons": "^5.14.0",
+    "@blueprintjs/select": "^5.3.0",
+    "@mediapipe/tasks-vision": "^1.2.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "playwright": "1.62.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

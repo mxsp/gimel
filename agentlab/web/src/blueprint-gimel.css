@@ -1,0 +1,71 @@
+/* Gimel über Blueprint: gemeinsam für Web-App und Grundriss. */
+
+body { background: var(--g-bg); color: var(--g-text); }
+
+/* Vor allen Zeilen-Links, die mit a.klasse dieselbe Spezifität haben und gewinnen. */
+:root a, :root a:hover { color: var(--gimel-accent-ink); }
+
+/* Überschriften folgen der Gliederung, nicht der gewünschten Größe. */
+:where(.app-main, .bp5-portal) h2 { font-size: 17px; line-height: 1.3; }
+:where(.app-main, .bp5-portal) h3 { font-size: 15px; line-height: 1.3; }
+:where(.app-main, .bp5-portal) h4 { font-size: 13px; line-height: 1.3; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+th .sr-only { position: static; display: inline-block; }
+
+/* Kopfzeile */
+.gimel-bar.bp5-navbar { display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 12px; flex-shrink: 0; }
+a.gimel-brand { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 16px; font-weight: 600; color: var(--gimel-accent-ink); }
+a.gimel-brand:hover { text-decoration: none; color: var(--gimel-accent-ink); }
+a.gimel-brand:focus-visible { outline: 2px solid var(--gimel-accent-ink); outline-offset: 2px; }
+.gimel-mark { display: block; flex-shrink: 0; }
+.gimel-bar-who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
+.demo-banner {
+  flex-shrink: 0;
+  padding: 2px 12px;
+  background: var(--g-banner);
+  color: var(--g-on-banner);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+@media (max-width: 720px) {
+  .gimel-brand-name, .gimel-bar-who, .hide-narrow { display: none; }
+  .gimel-bar.bp5-navbar { gap: 4px; padding: 0 8px; }
+}
+
+/* Blueprints Text auf getönten Minimal-Tags liegt knapp unter 4,5:1 (WCAG 1.4.3).
+   Gleiche Farbfamilie, eine Stufe dunkler. */
+.bp5-tag.bp5-minimal.bp5-intent-primary:not(.bp5-interactive) { color: var(--g-tag-primary-ink); background: rgb(var(--gimel-accent-rgb) / 0.12); }
+.bp5-tag.bp5-minimal.bp5-intent-success:not(.bp5-interactive) { color: var(--g-tag-success-ink); }
+.bp5-tag.bp5-minimal.bp5-intent-warning:not(.bp5-interactive) { color: var(--g-tag-warning-ink); }
+.bp5-tag.bp5-minimal.bp5-intent-danger:not(.bp5-interactive) { color: var(--g-tag-danger-ink); }
+
+/* Blueprints Blau wird Gimel-Teal: Knöpfe, Links, Schalter, Reiter, Fokus.
+   Blueprint ist fertig kompiliert, deshalb hier und nicht über Variablen. */
+:root :focus { outline-color: rgb(var(--gimel-accent-rgb) / 0.7); }
+:root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined) { background-color: var(--gimel-accent); color: var(--gimel-on-accent); }
+:root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined):hover { background-color: var(--gimel-accent-hover); }
+:root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined):active,
+:root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined).bp5-active { background-color: var(--gimel-accent-press); }
+:root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined).bp5-disabled { background-color: rgb(var(--gimel-accent-rgb) / 0.5); color: rgb(var(--g-surface-rgb) / 0.75); }
+:root .bp5-button.bp5-minimal.bp5-intent-primary, :root .bp5-button.bp5-outlined.bp5-intent-primary { color: var(--gimel-accent-ink); }
+:root .bp5-button.bp5-minimal.bp5-intent-primary .bp5-icon, :root .bp5-button.bp5-outlined.bp5-intent-primary .bp5-icon { color: inherit; }
+:root .bp5-input:focus, :root .bp5-input.bp5-active { box-shadow: inset 0 0 0 1px var(--gimel-accent), 0 0 0 2px rgb(var(--gimel-accent-rgb) / 0.3), inset 0 1px 1px rgb(var(--g-ink-rgb) / 0.2); }
+:root .bp5-control input:checked ~ .bp5-control-indicator { background-color: var(--gimel-accent); }
+:root .bp5-control:hover input:checked ~ .bp5-control-indicator { background-color: var(--gimel-accent-hover); }
+:root .bp5-control input:focus-visible ~ .bp5-control-indicator { outline-color: rgb(var(--gimel-accent-rgb) / 0.7); }
+:root .bp5-control.bp5-switch input:checked ~ .bp5-control-indicator { background: var(--gimel-accent); }
+:root .bp5-control.bp5-switch:hover input:checked ~ .bp5-control-indicator { background: var(--gimel-accent-hover); }
+:root .bp5-tab[aria-selected="true"], :root .bp5-tab:not([aria-disabled="true"]):hover { color: var(--gimel-accent-ink); }
+:root .bp5-tab[aria-selected="true"] { box-shadow: inset 0 -3px 0 var(--gimel-accent); }
+:root .bp5-tab-indicator-wrapper .bp5-tab-indicator { background-color: var(--gimel-accent); }
+:root .bp5-menu-item.bp5-active.bp5-intent-primary, :root .bp5-menu-item.bp5-active { background-color: rgb(var(--gimel-accent-rgb) / 0.12); color: var(--gimel-accent-ink); }
+:root .bp5-menu-item.bp5-active .bp5-menu-item-icon, :root .bp5-menu-item.bp5-active .bp5-icon { color: inherit; }
+:root .bp5-callout.bp5-intent-primary { background-color: rgb(var(--gimel-accent-rgb) / 0.1); }
+.bp5-callout.bp5-intent-primary > .bp5-icon:first-child, :root .bp5-dark .bp5-callout.bp5-intent-primary > .bp5-icon:first-child { color: var(--gimel-accent-ink); }
+

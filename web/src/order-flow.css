@@ -1,0 +1,561 @@
+/* Gimel — Auftragsweg & Orderflow-Bausteine.
+   Geladen nur im Portal (src/main.tsx): Twin Studio und Agent Lab bleiben
+   unberührt. Alle Farben stammen aus tokens.css (hell & dunkel, WCAG AA). */
+
+/* --- 1. Auftragsweg-Stufenleiste (Heute & Aufträge) ------------------------- */
+.order-pipeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 var(--g-space-4);
+  padding: 10px 12px;
+  border: 1px solid var(--g-rule-soft);
+  border-radius: 6px;
+  background: var(--g-chrome);
+}
+
+.order-pipeline-track {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.order-pipe-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--g-rule-soft);
+  border-radius: 5px;
+  background: var(--g-surface);
+  color: var(--g-text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.order-pipe-stage:hover {
+  border-color: var(--gimel-accent);
+  background: var(--gimel-accent-wash);
+  color: var(--g-text-strong);
+  text-decoration: none;
+}
+
+.order-pipe-stage:focus-visible {
+  outline: 2px solid var(--gimel-accent-ink);
+  outline-offset: 1px;
+}
+
+.order-pipe-stage.is-empty {
+  background: color-mix(in srgb, var(--g-surface) 60%, var(--g-chrome));
+}
+
+.order-pipe-stage.is-empty .order-pipe-count {
+  color: var(--g-muted);
+}
+
+.order-pipe-stage.is-active {
+  border-color: var(--gimel-accent);
+  background: var(--gimel-accent-wash);
+  box-shadow: inset 0 -2px 0 var(--gimel-accent);
+}
+
+.order-pipe-step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--g-chrome-head);
+  color: var(--g-text-2);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.order-pipe-stage.is-active .order-pipe-step-no {
+  background: var(--gimel-accent);
+  color: var(--gimel-on-accent);
+}
+
+.order-pipe-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.order-pipe-label {
+  font-size: 12px;
+  color: var(--g-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-pipe-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--g-text-strong);
+}
+
+.order-pipe-urgent {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--g-danger);
+  flex-shrink: 0;
+}
+
+.order-pipeline-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.order-pipe-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 1px solid var(--g-rule-soft);
+  border-radius: 999px;
+  background: var(--g-surface);
+  color: var(--g-text-2);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.order-pipe-pill b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--g-text-strong);
+}
+
+.order-pipe-pill:hover {
+  border-color: var(--gimel-accent);
+  color: var(--gimel-accent-ink);
+  text-decoration: none;
+}
+
+.order-pipe-pill:focus-visible {
+  outline: 2px solid var(--gimel-accent-ink);
+  outline-offset: 1px;
+}
+
+.order-pipe-pill.is-active {
+  border-color: var(--gimel-accent);
+  background: var(--gimel-accent-soft);
+  color: var(--gimel-accent-ink);
+}
+
+.order-pipe-pill.is-danger {
+  border-color: color-mix(in srgb, var(--g-danger) 45%, var(--g-rule-soft));
+  background: var(--g-danger-soft);
+  color: var(--g-danger-ink);
+}
+.order-pipe-pill.is-danger b { color: var(--g-danger-ink); }
+.order-pipe-pill.is-danger.is-active { border-color: var(--g-danger); box-shadow: inset 0 0 0 1px var(--g-danger); }
+
+.order-pipe-pill.is-warning {
+  border-color: color-mix(in srgb, var(--g-warning) 55%, var(--g-rule-soft));
+  background: var(--g-warning-soft);
+  color: var(--g-warning-ink);
+}
+.order-pipe-pill.is-warning b { color: var(--g-warning-ink); }
+.order-pipe-pill.is-warning.is-active { border-color: var(--g-warning); box-shadow: inset 0 0 0 1px var(--g-warning); }
+
+@media (max-width: 1240px) {
+  .order-pipeline-track { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .order-pipeline { padding: 8px; }
+  .order-pipeline-track { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .order-pipe-stage { padding: 8px; min-height: 48px; }
+  .order-pipe-pill { min-height: 32px; padding: 3px 10px; }
+}
+
+/* --- 2. Tabellen-Verfeinerung im Auftragsweg -------------------------------- */
+.order-no-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.order-rush-tag {
+  font-size: 11px;
+}
+
+.order-row-cancelled td {
+  background: var(--g-chrome);
+  color: var(--g-muted);
+}
+.order-row-cancelled td b {
+  color: var(--g-muted);
+}
+.order-row-cancelled td:first-child b {
+  text-decoration: line-through;
+}
+
+.due-date-late {
+  color: var(--g-danger-ink);
+  font-weight: 600;
+}
+
+.due-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  vertical-align: baseline;
+}
+.due-pill-danger { background: var(--g-danger-soft); color: var(--g-danger-ink); }
+.due-pill-warning { background: var(--g-warning-soft); color: var(--g-warning-ink); }
+.due-pill-none { background: var(--g-chrome-head); color: var(--g-text-2); }
+
+.order-status-cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.order-pos-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.order-pos-bar {
+  display: inline-block;
+  width: 38px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--g-track);
+  overflow: hidden;
+}
+
+.order-pos-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--gimel-accent);
+}
+
+/* --- 3. Nächster Schritt in der Auftrags-Schublade -------------------------- */
+.order-next-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--g-rule-soft);
+  border-left: 3px solid var(--gimel-accent);
+  border-radius: 6px;
+  background: var(--gimel-accent-wash);
+}
+
+.order-next-warning {
+  border-color: color-mix(in srgb, var(--g-warning) 45%, var(--g-rule-soft));
+  border-left-color: var(--g-warning);
+  background: var(--g-warning-soft);
+}
+
+.order-next-danger {
+  border-color: color-mix(in srgb, var(--g-danger) 45%, var(--g-rule-soft));
+  border-left-color: var(--g-danger);
+  background: var(--g-danger-soft);
+}
+
+.order-next-success {
+  border-color: color-mix(in srgb, var(--g-success) 40%, var(--g-rule-soft));
+  border-left-color: var(--g-success);
+  background: var(--g-success-soft);
+}
+
+.order-next-none {
+  border-left-color: var(--g-muted);
+  background: var(--g-chrome);
+}
+
+.order-next-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.order-next-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--g-muted);
+}
+
+.order-next-headline {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--g-text-strong);
+}
+
+.order-next-reason {
+  font-size: 12px;
+  color: var(--g-text-2);
+}
+
+/* --- 4. Auftragsweg-Stepper (Schublade) ------------------------------------- */
+.order-stepper {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 10px 4px 12px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}
+
+.order-step {
+  flex: 1 0 112px;
+  min-width: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.order-step-side {
+  margin-left: 10px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--g-rule-soft);
+}
+
+.order-step-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.order-step-node {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--g-chrome-head);
+  color: var(--g-muted);
+  border: 1px solid var(--g-rule-soft);
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.order-step-line {
+  position: absolute;
+  left: calc(50% + 16px);
+  right: calc(-50% + 16px);
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: var(--g-track);
+}
+
+.order-step-line.is-done {
+  background: var(--gimel-accent);
+}
+
+.order-step-done .order-step-node {
+  background: var(--gimel-accent);
+  border-color: var(--gimel-accent);
+  color: var(--gimel-on-accent);
+}
+
+.order-step-current .order-step-node {
+  background: var(--g-surface);
+  border: 2px solid var(--gimel-accent);
+  color: var(--gimel-accent-ink);
+  box-shadow: 0 0 0 4px rgb(var(--gimel-accent-rgb) / 0.16);
+}
+
+.order-step-blocked .order-step-node {
+  background: var(--g-danger-soft);
+  border: 2px solid var(--g-danger);
+  color: var(--g-danger-ink);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--g-danger) 18%, transparent);
+}
+
+.order-step-held .order-step-node {
+  background: var(--g-warning-soft);
+  border: 2px solid var(--g-warning);
+  color: var(--g-warning-ink);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--g-warning) 20%, transparent);
+}
+
+.order-step-todo .order-step-title,
+.order-step-cancelled .order-step-title {
+  color: var(--g-muted);
+}
+.order-step-todo .order-step-node,
+.order-step-cancelled .order-step-node {
+  background: var(--g-chrome);
+  color: var(--g-muted);
+  border-color: var(--g-rule-soft);
+}
+
+.order-step-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: 118px;
+  padding: 0 4px;
+}
+
+.order-step-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--g-text);
+  line-height: 1.25;
+}
+
+.order-step-current .order-step-title,
+.order-step-blocked .order-step-title,
+.order-step-held .order-step-title {
+  font-weight: 600;
+  color: var(--g-text-strong);
+}
+
+button.order-step-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--gimel-accent-ink);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--gimel-accent-ink) 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+button.order-step-link:hover {
+  text-decoration-color: currentColor;
+}
+
+button.order-step-link:focus-visible {
+  outline: 2px solid var(--gimel-accent-ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.order-step-date {
+  font-size: 11px;
+  color: var(--g-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.order-step-detail {
+  font-size: 11px;
+  color: var(--g-muted);
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-step-undo {
+  margin-top: 4px;
+}
+
+/* --- 5. Büronotiz, OrderProgress-Held & Dispo-Innenaufträge ----------------- */
+.order-office-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--g-rule-soft);
+  border-radius: 5px;
+  background: var(--g-chrome);
+  color: var(--g-text);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.progress-held .progress-dot {
+  background: var(--g-warning);
+  border-color: var(--g-warning);
+}
+
+.order-progress-cancelled {
+  opacity: 0.72;
+}
+
+.dispo-wo-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+/* Dunkelansicht: Akzent-Kanten und -Fortschritt in --gimel-accent-ink (WCAG 1.4.11 ≥ 3:1). */
+:root[data-theme="dark"] .order-pipe-stage:hover {
+  border-color: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .order-pipe-stage.is-active {
+  border-color: var(--gimel-accent-ink);
+  box-shadow: inset 0 -2px 0 var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .order-pipe-pill:not(.is-danger, .is-warning):hover,
+:root[data-theme="dark"] .order-pipe-pill:not(.is-danger, .is-warning).is-active {
+  border-color: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .order-pos-bar > span {
+  background: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .order-next-bar:not(.order-next-warning, .order-next-danger, .order-next-success, .order-next-none) {
+  border-left-color: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .order-step-line.is-done {
+  background: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .order-step-current .order-step-node {
+  border-color: var(--gimel-accent-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .order-pipe-stage,
+  .order-pipe-pill,
+  .order-step-node {
+    transition: none;
+  }
+}

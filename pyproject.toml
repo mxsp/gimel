@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gimel"
+version = "0.2.0"
+description = "Order, nesting, and production management for sheet-cutting manufacturers (Playground & Production)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "mxsp / FyreFly Systems GbR" }]
+keywords = ["erp", "mes", "manufacturing", "nesting", "dxf", "digital-twin"]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy>=2.0",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.3",
+  "email-validator>=2.1",
+  "python-multipart>=0.0.9",
+  "pyjwt>=2.8",
+  "bcrypt>=4.1",
+  "httpx>=0.27",
+  "ezdxf>=1.3",
+  "stripe>=7.0",
+  "cryptography>=42.0",
+  "numpy>=2.0",
+  "pypdf>=5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mxsp/gimel"
+Repository = "https://github.com/mxsp/gimel"
+Issues = "https://github.com/mxsp/gimel/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27", "opencv-python-headless>=4.9"]
+vision = ["opencv-python-headless>=4.9"]
+tts = ["edge-tts>=7.0"]
+# Optional local voice extra; piper-tts is GPL-3.0 (see THIRD_PARTY_LICENSES.md).
+voice = ["faster-whisper>=1.1,<2", "av>=13,<15", "piper-tts>=1.3,<2"]
+
+[project.scripts]
+gimel = "gimel.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["gimel*"]
+
+[tool.setuptools.package-data]
+gimel = ["admin/*", "webapp/dist/**/*", "twin/dist/**/*", "studio/dist/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

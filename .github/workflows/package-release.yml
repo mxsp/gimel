@@ -1,0 +1,72 @@
+name: Package Release (Container + Windows .exe + Linux Binary)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build Windows gimel.exe (Playground + Production)
+        shell: pwsh
+        run: ./packaging/build-exe.ps1
+      - name: Upload Windows executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gimel-windows-x64
+          path: |
+            packaging/dist/gimel.exe
+            packaging/dist/Start-Gimel-Playground.bat
+            packaging/dist/Start-Gimel-Production.bat
+            packaging/dist/Start-Gimel-Both.bat
+
+  linux-binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python deps
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install . "pyinstaller>=6.10"
+      - name: Install JS deps
+        run: |
+          cd web && npm ci --no-audit --no-fund
+          cd ../agentlab/web && npm ci --no-audit --no-fund
+      - name: Build Linux standalone binary
+        run: chmod +x packaging/build-exe.sh && ./packaging/build-exe.sh
+      - name: Upload Linux binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gimel-linux-x64
+          path: |
+            packaging/dist/gimel
+            packaging/dist/start-playground.sh
+            packaging/dist/start-production.sh
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Gimel dual-mode container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: gimel:latest

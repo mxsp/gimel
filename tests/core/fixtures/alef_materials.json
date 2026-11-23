@@ -1,0 +1,1021 @@
+{
+ "source": "Alef apps/api/app/seed_data.json @ a54735e6 (test fixture only; prices are Alef's placeholder values)",
+ "products": [
+  {
+   "id": "nbr-70",
+   "eurM2": 42,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ],
+    [
+     1500,
+     2000
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "NBR 70 Shore A (Semperit P559)",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "nbr-80",
+   "eurM2": 46,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ],
+    [
+     1500,
+     2000
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "NBR 80 Shore A",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "epdm-70",
+   "eurM2": 38,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ],
+    [
+     1500,
+     2000
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "EPDM 70 Shore A",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "epdm-trinkwasser",
+   "eurM2": 54,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "EPDM 65 Trinkwasser",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "fkm-75",
+   "eurM2": 268,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "FKM 75 Shore A",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "vmq-60",
+   "eurM2": 96,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1200,
+     1200
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "Silikon VMQ 60 transparent",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "vmq-70-fda",
+   "eurM2": 118,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1200,
+     1200
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "Silikon VMQ 70 FDA rot",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "cr-70",
+   "eurM2": 48,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "CR 70 Shore A (Chloropren)",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "nr-65",
+   "eurM2": 34,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ],
+    [
+     1500,
+     2000
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "NR 65 Shore A (Naturkautschuk)",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "sbr-70",
+   "eurM2": 30,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ],
+    [
+     1500,
+     2000
+    ]
+   ],
+   "kerf": 5,
+   "web": 10,
+   "name": "SBR 70 Shore A",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "zellkautschuk-epdm",
+   "eurM2": 28,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     2000
+    ]
+   ],
+   "kerf": 8,
+   "web": 14,
+   "name": "Zellkautschuk EPDM (Moosgummi)",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "silikonschaum",
+   "eurM2": 132,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     1000
+    ]
+   ],
+   "kerf": 8,
+   "web": 14,
+   "name": "Silikonschaum",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "ptfe-baso4",
+   "eurM2": 352,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1500
+    ],
+    [
+     1200,
+     1200
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Modifiziertes PTFE · Bariumsulfat",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "ptfe-glasfaser",
+   "eurM2": 318,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Modifiziertes PTFE · Glasfaser gefüllt",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "ptfe-silica",
+   "eurM2": 386,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Modifiziertes PTFE · Silica gefüllt",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "ptfe-hohlglas",
+   "eurM2": 404,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Modifiziertes PTFE · Hohlglaskugeln",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "ptfe-virgin",
+   "eurM2": 246,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1200,
+     1200
+    ],
+    [
+     1000,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "PTFE rein (virgin), geschält",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "eptfe",
+   "eurM2": 292,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Expandiertes PTFE (ePTFE), Platte",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "klinger-topchem-2000",
+   "eurM2": 851.46,
+   "eurM2Thk": {
+    "2": 851.46,
+    "3": 1499.94
+   },
+   "sheets": [
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGER top-chem 2000",
+   "grain": "none",
+   "flipOk": true,
+   "active": true
+  },
+  {
+   "id": "novaphit-sstc",
+   "eurM2": 246,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ],
+    [
+     1000,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "novaphit SSTC",
+   "grain": "axis",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novaphit-sstcta-l",
+   "eurM2": 268,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "novaphit SSTC TA-L",
+   "grain": "axis",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novaphit-mst",
+   "eurM2": 228,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "novaphit MST XP",
+   "grain": "axis",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novaphit-vs",
+   "eurM2": 264,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "novaphit VS",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "sigraflex-universal-pro",
+   "eurM2": 236,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     1000
+    ],
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "SIGRAFLEX UNIVERSAL PRO",
+   "grain": "axis",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novaphit-400",
+   "eurM2": 198,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "novaphit 400",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "graphit-spiessblech",
+   "eurM2": 184,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     1000
+    ],
+    [
+     1500,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Graphit mit Spießblecheinlage",
+   "grain": "axis",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "graphit-glattblech",
+   "eurM2": 172,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "SIGRAFLEX HOCHDRUCK",
+   "grain": "axis",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "graphit-folie",
+   "eurM2": 138,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     1000
+    ]
+   ],
+   "kerf": 6,
+   "web": 14,
+   "name": "Graphitfolie ohne Einlage",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "klingersil-c4240",
+   "eurM2": 68,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ],
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGERSIL C-4240",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "klingersil-c4300",
+   "eurM2": 67.305,
+   "eurM2Thk": {
+    "1": 51.06,
+    "2": 67.305,
+    "3": 145.3,
+    "1.5": 69.08
+   },
+   "sheets": [
+    [
+     2000,
+     1500
+    ],
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGERSIL C-4300",
+   "grain": "none",
+   "flipOk": true,
+   "active": true
+  },
+  {
+   "id": "klingersil-c4400",
+   "eurM2": 87.585,
+   "eurM2Thk": {
+    "1": 63.4,
+    "2": 87.585,
+    "3": 145.3,
+    "1.5": 93.7
+   },
+   "sheets": [
+    [
+     2000,
+     1500
+    ],
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGERSIL C-4400",
+   "grain": "none",
+   "flipOk": true,
+   "active": true
+  },
+  {
+   "id": "klingersil-c4409",
+   "eurM2": 92,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGERSIL C-4409",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "klingersil-c4430",
+   "eurM2": 104,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGERSIL C-4430",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "klingersil-c4500",
+   "eurM2": 128,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGERSIL C-4500",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "klingersil-c8200",
+   "eurM2": 148,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGERSIL C-8200",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "klingersil-quantum",
+   "eurM2": 214,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ],
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGERSIL Quantum",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "klinger-topsil-ml1",
+   "eurM2": 118,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "KLINGER top-sil ML1",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novapress-850",
+   "eurM2": 108,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novapress 850",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novapress-880",
+   "eurM2": 132,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novapress 880",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novapress-basic",
+   "eurM2": 62,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novapress Basic",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novapress-260",
+   "eurM2": 72,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novapress 260",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novapress-universal",
+   "eurM2": 84,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ],
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novapress Universal",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novapress-multi-ii",
+   "eurM2": 116,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novapress Multi II",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novatec-premium-xp",
+   "eurM2": 156,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novatec Premium XP",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novaform-sk",
+   "eurM2": 96,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novaform SK",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novaform-stf",
+   "eurM2": 128,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "Novaform STF",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "novaone-blue",
+   "eurM2": 138,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "novaone blue",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "teadit-na1002",
+   "eurM2": 124,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     2000,
+     1500
+    ],
+    [
+     1500,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "TEADIT NA-1002",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "centellen-ws-3820",
+   "eurM2": 67.035,
+   "eurM2Thk": {
+    "1": 47.66,
+    "2": 67.035,
+    "3": 144.82,
+    "1.5": 69.1
+   },
+   "sheets": [
+    [
+     1500,
+     1000
+    ],
+    [
+     2000,
+     1500
+    ]
+   ],
+   "kerf": 6,
+   "web": 12,
+   "name": "CENTELLEN WS 3820",
+   "grain": "none",
+   "flipOk": true,
+   "active": true
+  },
+  {
+   "id": "isoplan-greenline",
+   "eurM2": 186,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1200,
+     1200
+    ],
+    [
+     1000,
+     1000
+    ]
+   ],
+   "kerf": 8,
+   "web": 16,
+   "name": "isoplan GREENLINE",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "glimmer-mica",
+   "eurM2": 342,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     1000
+    ]
+   ],
+   "kerf": 10,
+   "web": 20,
+   "name": "Glimmerwerkstoff (Mica)",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "ht-textil",
+   "eurM2": 148,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     2000
+    ]
+   ],
+   "kerf": 10,
+   "web": 20,
+   "name": "Hochtemperaturtextil / Glasgewebe",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  },
+  {
+   "id": "keramikfaserpapier",
+   "eurM2": 96,
+   "eurM2Thk": null,
+   "sheets": [
+    [
+     1000,
+     1000
+    ]
+   ],
+   "kerf": 10,
+   "web": 20,
+   "name": "Keramikfaserpapier",
+   "grain": "none",
+   "flipOk": true,
+   "active": false
+  }
+ ],
+ "rates": {
+  "cut": 0.42,
+  "machineH": 65,
+  "cutSpeed": 43,
+  "cutThk1": 0.3611111111111111,
+  "cutThk15": 0.4333333333333333,
+  "cutThk2": 0.5416666666666666,
+  "cutThk3": 1.0833333333333333,
+  "setupFix1": 5,
+  "setupFix2": 7.5,
+  "setupFix3": 15,
+  "pierceS": 2,
+  "setupMin": 8,
+  "handlingMinPerPlate": 2,
+  "setupPct": 0.05,
+  "gap": 6,
+  "margin": 12,
+  "wasteMin": 1.15,
+  "wasteMax": 1.9,
+  "cert31": 45,
+  "freight": 14.9,
+  "sheetMarkup": 1.12,
+  "vat": 0.19,
+  "leftoverThreshold": 0.25
+ }
+}

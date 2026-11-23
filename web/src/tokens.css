@@ -1,0 +1,311 @@
+/* Gimel: die Farben der App, an einer Stelle. Web-App und Grundriss laden
+   dieselbe Datei. Eine Farbe ausserhalb dieses Blocks fällt in der Dunkelansicht
+   heraus, deshalb stehen in styles.css nur Verweise.
+
+   Kontrast (WCAG 2.2 AA):
+   Weiß auf --gimel-accent 5,26:1. --gimel-accent auf Weiß 5,26:1, auf
+   --g-surface-2 4,91:1. --gimel-accent-ink ist der Akzent als Fließtext.
+
+   Industrie-Look (2026-11-02): Blueprints Grauskala (Light Gray 1–5, Gray 1–5,
+   Dark Gray 1–5), 2-px-Radien, feste 1-px-Linien, flache Flächen mit kleinem
+   Schatten. Die Werte stehen hier, styles.css verweist nur.
+   Gemessen (WCAG 2.2 AA): Eingaberand --g-rule-strong auf Weiß 3,36:1, auf
+   --g-chrome 3,14:1; dunkel auf --g-surface 5,01:1. --g-muted auf --g-chrome-head
+   4,70:1. Station (--g-floor-station) auf Hallenboden hell 5,05:1, dunkel 5,50:1;
+   Schrift auf Station hell 5,41:1, dunkel 7,83:1. Text im Bau: kleinster Wert
+   4,59:1 hell, 4,64:1 dunkel. */
+
+:root {
+  /* Dichte je Arbeitsbereich: nur diese zwei Werte unterscheiden Büro und Leitstand. */
+  --g-row-h: 34px;
+  --g-control-h: 30px;
+
+  /* Form und Schrift: Blueprints 2 px, Systemschrift, Monospace für Nummern und Maße. */
+  --g-radius: 2px;
+  --g-font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* Schrift- und Abstandsstufen (Aufgabe 35 F): vier Schriftgrößen, sechs Abstände.
+     Seitentitel / Abschnitt / Text / Beschriftung; Abstände 4–32 px. */
+  --g-fs-title: 20px;
+  --g-fs-section: 15px;
+  --g-fs-body: 14px;
+  --g-fs-caption: 12px;
+  --g-fw-strong: 600;
+  --g-space-1: 4px;
+  --g-space-2: 8px;
+  --g-space-3: 12px;
+  --g-space-4: 16px;
+  --g-space-5: 24px;
+  --g-space-6: 32px;
+  /* Erhebung wie Blueprints Elevation 1 und 2: flache Fläche, dünner Schatten.
+     Die Kante liefert --g-rule; Menüs und Dialoge behalten Blueprints eigenen Schatten. */
+  --g-elev-1: 0 1px 1px rgb(var(--g-shadow-rgb) / 0.12);
+  --g-elev-2: 0 0 0 1px rgb(var(--g-shadow-rgb) / 0.12), 0 2px 4px rgb(var(--g-shadow-rgb) / 0.2);
+  /* Rahmen der Seitenleiste und Werkzeugleisten */
+  --g-chrome: #f6f7f9;
+  --g-chrome-head: #edeff2;
+
+  /* Akzent. Quelle: fyrefly_recovered/shared/ff/tokens.css (--gimel, --gimel-ink). */
+  --gimel-accent: #0b7a67;
+  --gimel-accent-ink: #0a6b5a;
+  --gimel-accent-hover: #0a6b5a;
+  --gimel-accent-press: #085548;
+  --gimel-on-accent: #ffffff;
+  --gimel-accent-soft: #dcefeb;
+  --gimel-accent-wash: #f0f8f6;
+  --gimel-accent-rgb: 11 122 103;
+
+  /* Flächen und Schrift */
+  --g-bg: #ffffff;
+  --g-surface: #ffffff;
+  --g-surface-2: #f6f7f9;
+  --g-surface-3: #f6f7f9;
+  --g-text: #1c2127;
+  --g-text-strong: #191d24;
+  --g-text-2: #404854;
+  --g-muted: #5f6b7c;
+  --g-faint: #5f6b7c;
+
+  /* Linien: dieselbe Tinte in fester Stärke. Der RGB-Wert steht für sich, damit
+     jede Regel ihre Deckkraft behält. */
+  --g-ink-rgb: 17 20 24;
+  --g-shadow-rgb: 17 20 24;
+  --g-surface-rgb: 255 255 255;
+  --g-rule: rgb(var(--g-ink-rgb) / 0.2);
+  --g-rule-soft: #dce0e5;
+  --g-rule-strong: #838d9a;
+  --g-track: #dce0e5;
+
+  /* Bedeutung: Grundton, -ink für Text, -soft für Flächen */
+  --g-danger: #cd4246;
+  --g-danger-ink: #ac2f33;
+  --g-danger-soft: #fdeaea;
+  --g-supply-danger: #d63c3c;
+  --g-supply-warn: #d9822b;
+  --g-warning: #ca9c19;
+  --g-warning-ink: #77450d;
+  --g-warning-soft: #fff8e6;
+  --g-success: #23704a;
+  --g-success-2: #4a9d6e;
+  --g-success-ink: #1c6e42;
+  --g-success-soft: #eaf6ee;
+  --g-tl-stock: #1668ac;
+  --g-tl-out: #c26a1a;
+  --g-success-rgb: 33 126 86;
+  --g-info: #1668ac;
+  --g-info-ink: #0a5b9c;
+  --g-info-soft: #e5f3ff;
+  --g-info-rgb: 10 91 156;
+  --g-warm-rgb: 217 130 43;
+
+  /* Tags */
+  --g-tag-primary-ink: #0a6b5a;
+  --g-tag-success-ink: #165a36;
+  --g-tag-warning-ink: #77450d;
+  --g-tag-danger-ink: #8e292c;
+
+  /* Datenfarben: Diagramme und Plan */
+  --g-data-hot: #c44a34;
+  --g-data-cool: #9ab0c3;
+  --g-data-bar: #6aa4d4;
+  --g-data-violet-ink: #5c4a8e;
+  --g-data-violet-rgb: 142 92 184;
+  --g-sim: #6d3fe0;
+  --g-on-data: #ffffff;
+  --g-on-data-soft: rgb(255 255 255 / 0.8);
+  --g-on-data-strong: rgb(255 255 255 / 0.9);
+  --g-on-data-faint: rgb(255 255 255 / 0.22);
+
+  /* Grundriss */
+  --g-floor-outside: #e5e8eb;
+  --g-floor-apron: #e9e4d7;
+  --g-floor-hall: #f6f7f9;
+  --g-floor-grid: #dce0e5;
+  --g-floor-grid-major: #c5cbd3;
+  --g-floor-hatch: #738091;
+  --g-floor-aisle: #3f7fb8;
+  /* Fahrspuren, Hallenhülle: eigene Töne, damit die Wege auch ohne Status
+     als befahrbare Fläche lesbar sind. */
+  --g-floor-aisle-lane: #cbe1f3;
+  --g-floor-aisle-edge: #79add6;
+  --g-hall-frame: #8d99a6;
+  --g-hall-glass: #b9d4e8;
+  --g-hall-roof: #cfd9e2;
+  --g-floor-warn: #c4520a;
+  --g-floor-error: #c4483b;
+  --g-floor-snap: #0a5b9c;
+  --g-floor-edge: rgb(17 20 24 / 0.35);
+  --g-floor-badge: #1c4a2e;
+  --g-floor-on-chip: #394b59;
+  /* Leitstand: ruhige Station. Fläche zu Hallenboden ≥ 3:1, Schrift ≥ 4,5:1. */
+  --g-floor-station: #5f6b7c;
+  --g-floor-station-line: #1c2127;
+  --g-floor-on-station: #ffffff;
+  /* Semi-3D: feste Körperfarben, damit die Karte in beiden Themes wie ein
+     Modell aussieht und weiße Beschriftung auf jedem Dach trägt. */
+  --g-iso-top: #4f5b69;
+  --g-iso-side: #343d47;
+  --g-iso-side-line: #14191f;
+  --g-iso-on: #ffffff;
+  --g-floor-off-line: #5f6b7c;
+  /* 3D-Geräte (task 37): Lack, Stahl, Regal, Sicherheit. Halbrealistisch und
+     in beiden Themes ähnlich; im Dunkeln etwas gedämpft, damit nichts blendet.
+     Kopf der Figuren bewusst neutral grau (Helm, keine Hautfarbe). */
+  --g-dev-paint: #d9dde2;
+  --g-dev-paint-dark: #3b434c;
+  --g-dev-steel: #a9b3bd;
+  --g-dev-rubber: #24292f;
+  --g-dev-rack: #2f6fb0;
+  --g-dev-beam: #e07a1f;
+  --g-dev-safety: #f2c230;
+  --g-dev-wood: #b98c5a;
+  --g-dev-carton: #c49a6c;
+  --g-dev-water: #3d8fb3;
+  --g-dev-screen: #1d6fb8;
+  --g-dev-glass: #b9d4e8;
+  --g-dev-vest: #e8d82c;
+  --g-dev-work: #2c4a6e;
+  --g-dev-head: #c9ced4;
+  --g-dev-forklift: #e39a1c;
+  --g-lift-sign-bg: #1f2933;
+  --g-lift-sign-fg: #f4f7fa;
+  --g-lift-pad: #217e56;
+  --g-map-tint: #ffffff;
+  --g-flow-supply: rgb(var(--g-data-violet-rgb));
+  --g-flow-ship: rgb(var(--g-success-rgb));
+
+  /* Hinweisband der Demo */
+  --g-banner: #ffc940;
+  --g-on-banner: #1c2127;
+
+  /* Zeichnungen bleiben auf Papier, auch in der Dunkelansicht. */
+  --g-paper: #ffffff;
+  /* Teile auf der Platte: stehen auf --g-paper und werden im Dunkeln nicht
+     überschrieben. Linien ≥ 3:1 auf Papier, Marke ≥ 4,5:1 auf ihrer Fläche. */
+  --g-paper-accent: #0a6b5a;
+  --g-paper-part: #dcebf7;
+  --g-paper-part-line: #1668ac;
+  --g-paper-part-ink: #0a3f6b;
+  --g-paper-sel: #bfe6dc;
+  --g-paper-bad: #fbd7d6;
+  --g-paper-bad-line: #ac2f33;
+  --g-paper-bad-ink: #8e292c;
+}
+
+/* Dunkelansicht: Blueprints Grauwerte, damit eigene Flächen und Blueprints
+   Bausteine zusammenpassen. theme.ts setzt data-theme vor dem ersten Rendern.
+   Text auf --g-surface: Akzent-Ink 9,3:1, gedämpft 7,1:1. Weiß auf dem Akzent
+   bleibt 5,26:1; als Text wäre der Grundton mit 3,0:1 zu schwach, deshalb -ink. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --gimel-accent-ink: #4fd1b8;
+  --gimel-accent-hover: #0a6b5a;
+  --gimel-accent-press: #085548;
+  --gimel-accent-soft: #17463f;
+  --gimel-accent-wash: #1f3a37;
+  --gimel-accent-rgb: 79 209 184;
+
+  --g-chrome: #1c2127;
+  --g-chrome-head: #252a31;
+
+  --g-bg: #1c2127;
+  --g-surface: #252a31;
+  --g-surface-2: #2f343c;
+  --g-surface-3: #292e36;
+  --g-text: #f6f7f9;
+  --g-text-strong: #ffffff;
+  --g-text-2: #d3d8de;
+  --g-muted: #b6bdc8;
+  --g-faint: #a0a9b6;
+
+  --g-ink-rgb: 255 255 255;
+  --g-shadow-rgb: 0 0 0;
+  --g-surface-rgb: 37 42 49;
+  --g-rule-soft: #404854;
+  --g-rule-strong: #8f99a8;
+  --g-track: #404854;
+
+  --g-danger: #e76a6e;
+  --g-danger-ink: #ff9a9d;
+  --g-danger-soft: #4a2628;
+  --g-supply-danger: #ff6b6b;
+  --g-supply-warn: #f0a43c;
+  --g-warning: #ec9a3c;
+  --g-warning-ink: #fbb360;
+  --g-warning-soft: #43331a;
+  --g-success: #32a467;
+  --g-success-2: #4dbb80;
+  --g-tl-stock: #4f95d0;
+  --g-tl-out: #c97a33;
+  --g-success-ink: #72ca9b;
+  --g-success-soft: #1d3a2b;
+  --g-success-rgb: 50 164 103;
+  --g-info: #4c90f0;
+  --g-info-ink: #8abbff;
+  --g-info-soft: #1d3350;
+  --g-info-rgb: 76 144 240;
+  --g-warm-rgb: 236 154 60;
+
+  --g-tag-primary-ink: #6fdcc6;
+  --g-tag-success-ink: #8bd8b0;
+  --g-tag-warning-ink: #fbc98a;
+  --g-tag-danger-ink: #ffb1b3;
+
+  --g-data-hot: #e76a6e;
+  --g-data-cool: #5f6b7c;
+  --g-data-bar: #4c90f0;
+  --g-data-violet-ink: #d6b4f5;
+  --g-data-violet-rgb: 190 140 240;
+  --g-sim: #a78bfa;
+
+  --g-floor-outside: #1c2127;
+  --g-floor-apron: #242a31;
+  --g-floor-hall: #2f343c;
+  --g-floor-grid: #404854;
+  --g-floor-grid-major: #5f6b7c;
+  --g-floor-hatch: #738091;
+  --g-floor-aisle: #6ba8e5;
+  --g-floor-aisle-lane: #2b4356;
+  --g-floor-aisle-edge: #5686af;
+  --g-hall-frame: #5b6672;
+  --g-hall-glass: #3a566c;
+  --g-hall-roof: #2a333d;
+  --g-floor-warn: #fbb360;
+  --g-floor-error: #ff9a9d;
+  --g-floor-snap: #8abbff;
+  --g-floor-edge: rgb(255 255 255 / 0.35);
+  --g-floor-badge: #2a7a4d;
+  --g-floor-station: #a3adb8;
+  --g-floor-station-line: #f6f7f9;
+  --g-floor-on-station: #14181d;
+  --g-iso-top: #46515e;
+  --g-iso-side: #2b333c;
+  --g-iso-side-line: #0d1116;
+  --g-iso-on: #ffffff;
+  --g-floor-off-line: #a0a9b6;
+  --g-dev-paint: #aeb5bd;
+  --g-dev-paint-dark: #2a3038;
+  --g-dev-steel: #8a949f;
+  --g-dev-rubber: #1a1e23;
+  --g-dev-rack: #3c79b8;
+  --g-dev-beam: #c96c1b;
+  --g-dev-safety: #d6ab2a;
+  --g-dev-wood: #8f6c45;
+  --g-dev-carton: #9c7b56;
+  --g-dev-water: #2f7596;
+  --g-dev-screen: #4c90f0;
+  --g-dev-glass: #3a566c;
+  --g-dev-vest: #cfc12a;
+  --g-dev-work: #3a5a80;
+  --g-dev-head: #a3acb6;
+  --g-dev-forklift: #c9881a;
+  --g-lift-sign-bg: #11161b;
+  --g-lift-sign-fg: #e6ebf0;
+  --g-lift-pad: #4a9d6e;
+  --g-map-tint: #5d6670;
+}
+
+/* Bevor das Skript läuft, nicht weiß aufblitzen. */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) { background: #1c2127; }
+}

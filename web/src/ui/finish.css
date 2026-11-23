@@ -1,0 +1,1019 @@
+/* Gimel — Feinschliff (Aufgabe 35, zweite Runde, 2026-11-13).
+   Geladen nur vom Portal-Eingang src/main.tsx, nach vercel-polish.css. Nur
+   Verweise auf tokens.css; keine neuen Farben.
+
+   Was hier steht, gilt für alle Bildschirme zugleich:
+   1. Eine Schrift: Knöpfe, Eingaben und Auswahlfelder erben Geist. Der Browser
+      setzt Formularelemente sonst in seiner eigenen Schrift (Arial), und jede
+      Werkzeugleiste sah anders aus als der Text daneben.
+   2. Ein Tabellenkopf: Satzschrift, nie Monospace, eine Größe.
+   3. Zahlen ruhig: Satzschrift mit festen Ziffernbreiten. Monospace bleibt den
+      Kennungen (Auftragsnummer, Werkstoffschlüssel, Maße in Zeichnungen). */
+
+/* 1 — eine Schrift. :where hält die Spezifität bei null, damit die wenigen
+   Felder, die bewusst Monospace sind (.colour-hex input, .draw-num input),
+   ihre Regel behalten. */
+:where(button, input, select, textarea, optgroup) { font-family: inherit; }
+
+/* 2 — ein Tabellenkopf. */
+/* Gleich stark wie die ältere Regel in styles.css (.bp5-html-table.data-table th), steht später, gewinnt also. */
+:root .bp5-html-table th {
+  font-family: var(--g-font-sans);
+  font-size: var(--g-fs-caption);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--g-text-2);
+}
+
+/* 3 — Zahlen in Satzschrift, gleich breit. */
+/* :where hält die Stärke bei einer Klasse: eine Seitenregel wie „.x .num" gewinnt weiter. */
+:root :where(.num, td.num, .heute-count, .stat-value, .fn-stat .v, .ui-kpi-value, .flow-kpi b, .leitstand-kpi b) {
+  font-family: var(--g-font-sans);
+  font-variant-numeric: tabular-nums;
+}
+:root :where(td.num) { font-size: var(--g-fs-body); }
+:root :where(.ui-kpi-value) { font-size: 22px; letter-spacing: -0.02em; }
+.ui-kpi-hero .ui-kpi-value { font-size: 28px; }
+.ui-kpis-inline .ui-kpi-value { font-size: var(--g-fs-body); letter-spacing: 0; }
+/* Auch „num mono" ist eine Menge (65 min, 7,5 h), keine Kennung: Kennungen stehen nie in Zahlenspalten. */
+:root :where(td.num.mono) { font-family: var(--g-font-sans); font-size: var(--g-fs-body); }
+
+/* Nur in „Alles": technische Zusätze (Werkstoffschlüssel unter dem Namen). Sie sind
+   nie die einzige Angabe — der Name steht immer daneben. */
+:root[data-detail="einfach"] .ui-detail-only { display: none; }
+
+/* Zahlenleiste: etwas Luft, die Zahl führt, die Beschriftung tritt zurück. */
+:root .ui-kpi-label { color: var(--g-muted); }
+:root .ui-kpi-sub { line-height: 1.35; }
+
+/* Seitenkopf der gewöhnlichen Seiten (PageFrame): darunter Luft. Der kompakte Kopf
+   von Grundriss und Hallen-Editor bleibt, wie er ist — dort zählt jede Zeile Höhe
+   für die Bühne (web/hall-editor.test.mjs). */
+:root .ui-page > .ui-page-head:not(.ui-page-head-compact) { margin-bottom: var(--g-space-4); }
+:root .ui-page > .ui-page-head .page-sub { margin-top: 2px; color: var(--g-muted); }
+
+/* Status-Etiketten: flach, eine Form. Die Farbe trägt die Bedeutung, die Kante
+   tritt zurück; das Wort bleibt immer dabei (nie nur Farbe). */
+:root .bp5-tag.bp5-minimal:not(.bp5-interactive) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* „Suchen & springen“ in der Kopfzeile: ein Feld, das wie eine Eingabe aussieht
+   und die Palette öffnet. */
+.gimel-jump {
+  display: inline-flex; align-items: center; gap: var(--g-space-2);
+  min-width: 220px; max-width: 340px; flex: 0 1 340px;
+  height: var(--g-control-h); padding: 0 var(--g-space-2);
+  border: 1px solid var(--g-rule-strong); border-radius: var(--g-radius);
+  background: var(--g-surface); color: var(--g-muted);
+  font-size: var(--g-fs-body); text-align: left; cursor: pointer;
+}
+.gimel-jump:hover { border-color: var(--gimel-accent); color: var(--g-text-2); }
+.gimel-jump:focus-visible { outline: 2px solid var(--gimel-accent-ink); outline-offset: 1px; }
+.gimel-jump-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gimel-jump kbd {
+  flex: 0 0 auto; padding: 0 5px; border: 1px solid var(--g-rule-strong); border-radius: var(--g-radius);
+  font-family: var(--g-font-mono); font-size: 11px; line-height: 18px; color: var(--g-text-2);
+}
+@media (max-width: 720px) {
+  .gimel-jump { min-width: 0; flex: 1 1 auto; min-height: 40px; }
+  .gimel-jump kbd { display: none; }
+  /* Am Telefon reicht „Suchen" — „Suchen & …" abgeschnitten sagt weniger. */
+  .gimel-jump-long { display: none; }
+}
+
+/* Die Palette selbst: eigener Schleier statt Blueprint-Dialog (Fokus im selben Tastendruck). */
+/* Über allem: auch über dem Auftrags-Drawer (ui/Drawer, 4000) und dem Assistenten (4100). */
+.jump-backdrop {
+  position: fixed; inset: 0; z-index: 4200; display: flex; align-items: flex-start; justify-content: center;
+  padding: 12vh 12px 12px; background: rgb(var(--g-shadow-rgb) / 0.45);
+}
+.jump-dialog {
+  width: min(640px, 100%); display: flex; flex-direction: column; max-height: calc(100vh - 12vh - 24px);
+  background: var(--g-surface); color: var(--g-text);
+  border: 1px solid var(--g-rule-strong); border-radius: 8px;
+  box-shadow: var(--g-elev-2), 0 18px 48px rgb(var(--g-shadow-rgb) / 0.35);
+}
+.jump-busy { flex: 0 0 auto; font-size: var(--g-fs-caption); color: var(--g-muted); }
+.jump-input-row { display: flex; align-items: center; gap: var(--g-space-2); padding: var(--g-space-3) var(--g-space-4); border-bottom: 1px solid var(--g-rule-soft); }
+.jump-input-row .bp5-icon { color: var(--g-muted); }
+.jump-input {
+  flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: none; color: var(--g-text);
+  font-size: 16px; line-height: 24px;
+}
+.jump-input::placeholder { color: var(--g-muted); }
+.jump-list { flex: 1 1 auto; min-height: 0; max-height: min(52vh, 420px); overflow-y: auto; padding: var(--g-space-1) 0; margin: 0; list-style: none; }
+.jump-group { padding: var(--g-space-2) var(--g-space-4) 2px; font-size: var(--g-fs-caption); color: var(--g-muted); }
+.jump-item {
+  display: flex; align-items: center; gap: var(--g-space-3); width: 100%;
+  min-height: 36px; padding: 4px var(--g-space-4); color: var(--g-text);
+  font-size: var(--g-fs-body); text-align: left; cursor: pointer;
+}
+.jump-item .bp5-icon { color: var(--g-muted); flex: 0 0 auto; }
+/* Die Auswahl trägt nicht nur die Tönung (1,2:1), sondern einen Balken im Akzent (≥ 3:1, WCAG 1.4.11). */
+.jump-item[aria-selected="true"] { background: var(--gimel-accent-soft); color: var(--g-text-strong); box-shadow: inset 3px 0 0 var(--gimel-accent); }
+:root[data-theme="dark"] .jump-item[aria-selected="true"] { box-shadow: inset 3px 0 0 var(--gimel-accent-ink); }
+.jump-item[aria-selected="true"] .jump-item-hint { color: var(--g-text-2); }
+.jump-item[aria-selected="true"] .bp5-icon { color: var(--gimel-accent-ink); }
+.jump-item-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jump-item-text .mono { margin-right: var(--g-space-2); }
+.jump-item-hint { flex: 0 0 auto; font-size: var(--g-fs-caption); color: var(--g-muted); }
+.jump-empty { padding: var(--g-space-5) var(--g-space-4); color: var(--g-muted); text-align: center; }
+.jump-foot {
+  display: flex; gap: var(--g-space-4); padding: var(--g-space-2) var(--g-space-4);
+  border-top: 1px solid var(--g-rule-soft); font-size: var(--g-fs-caption); color: var(--g-muted);
+}
+.jump-foot kbd { font-family: var(--g-font-mono); font-size: 11px; padding: 0 4px; border: 1px solid var(--g-rule-strong); border-radius: var(--g-radius); margin-right: 4px; }
+@media (max-width: 720px) {
+  .jump-backdrop { padding-top: 12px; }
+  .jump-dialog { max-height: calc(100vh - 24px); }
+  .jump-item { min-height: 44px; }
+  .jump-foot { display: none; }
+}
+
+/* Ein (i) je Seite; weitere Regeln stehen als Abschnitte im selben Fenster. */
+.ui-page-info-section { margin-top: var(--g-space-3); padding-top: var(--g-space-3); border-top: 1px solid var(--g-rule-soft); }
+
+/* Die ältere Zahlenzeile (.ui-facts als Gruppe: Kommissionierung, Arbeitsvorrat, Disposition)
+   sieht aus wie die Zahlenleiste (.ui-kpis): Beschriftung oben, Zahl darunter, gleiche Karte.
+   Nur mit role="group" — das Plattenfeld der Produktion ist eine Angabenliste, keine Zahlenleiste. */
+:root .ui-facts[role="group"] {
+  gap: var(--g-space-2); align-items: stretch; margin: 0 0 var(--g-space-4); padding: 0; border-bottom: 0;
+}
+:root .ui-facts[role="group"] .ui-fact {
+  gap: 2px; min-width: 112px; padding: var(--g-space-2) var(--g-space-3);
+  border: 1px solid var(--g-rule); border-radius: var(--g-radius); background: var(--g-surface);
+}
+:root .ui-facts[role="group"] .ui-fact-label { order: -1; font-size: var(--g-fs-caption); letter-spacing: 0; text-transform: none; color: var(--g-muted); white-space: nowrap; }
+:root .ui-facts[role="group"] .ui-fact-value { font-size: 22px; line-height: 1.2; letter-spacing: -0.02em; font-weight: var(--g-fw-strong); color: var(--g-text-strong); font-variant-numeric: tabular-nums; }
+:root .ui-facts[role="group"] :is(.ui-fact-sub, .ui-fact small) { font-size: var(--g-fs-caption); color: var(--g-muted); }
+
+/* Begründungen: in „Einfach" zwei Zeilen, der Rest auf Klick (ui/Reason.tsx). */
+.ui-reason { margin: 4px 0 6px; }
+.ui-reason-text { margin: 0; }
+.ui-reason-text.is-clamped { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.ui-reason-toggle {
+  margin-top: 2px; padding: 0; border: 0; background: none; cursor: pointer;
+  font-size: var(--g-fs-caption); color: var(--gimel-accent-ink); text-decoration: underline; text-underline-offset: 2px;
+}
+.ui-reason-toggle:focus-visible { outline: 2px solid var(--gimel-accent-ink); outline-offset: 2px; }
+.ui-reason.finding-move-reason { font-size: 12px; color: var(--g-muted); overflow-wrap: anywhere; }
+
+/* Kennungen brechen nie um: „AB-26-0001" bleibt eine Zeile, auch am Telefon. */
+:root :where(.data-table td.mono, .data-table td > .mono, .data-table td > b.mono) { white-space: nowrap; }
+
+/* Hallen-Editor: die Werkzeuge bleiben eine Zeile. In Geist sind die Knöpfe etwas
+   breiter als in der Browserschrift davor; eine Stufe kleiner passt alles wieder
+   in eine Zeile, und die Bühne behält ihre Höhe (web/hall-editor.test.mjs). */
+:root .hall-editor .editor-tools .bp5-button { padding-left: 6px; padding-right: 6px; font-size: 13px; }
+
+/* ==========================================================================
+   Portal-Oberfläche: ruhigere Geometrie, klare Trennung, feinere Flächen
+   (nur Portal /app — Twin Studio und Assistent laden diese Datei nicht).
+   ========================================================================== */
+
+/* Kopfzeile: klare Trennlinie statt schwerem Blueprint-Schatten. */
+:root .gimel-bar.bp5-navbar {
+  background: var(--g-surface);
+  box-shadow: none;
+  border-bottom: 1px solid var(--g-rule-soft);
+}
+:root .gimel-jump {
+  border-color: var(--g-rule);
+  border-radius: 5px;
+  background: var(--g-chrome);
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+:root .gimel-jump:hover {
+  background: var(--g-surface);
+}
+:root .ui-detail-switch {
+  border-color: var(--g-rule);
+  border-radius: 5px;
+}
+
+/* Seitenleiste: sachliche, industrielle Navigationsleiste ohne Pillen-Dekor. */
+:root .app-sidebar {
+  width: 224px;
+  padding: 0;
+  background: var(--g-chrome);
+  border-right: 1px solid var(--g-rule-soft);
+  scrollbar-gutter: auto;
+}
+:root .sidebar-nav {
+  padding: 10px 8px 18px;
+}
+:root .area-switch {
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  border: 0;
+  border-bottom: 1px solid var(--g-rule-soft);
+  border-radius: 0;
+  background: var(--g-chrome-head);
+}
+:root a.area-switch-link {
+  min-height: 38px;
+  border-radius: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--g-muted);
+  background: transparent;
+  box-shadow: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+:root a.area-switch-link + a.area-switch-link {
+  border-left: 1px solid var(--g-rule-soft);
+}
+:root a.area-switch-link:hover {
+  background: rgb(var(--g-ink-rgb) / 0.035);
+  color: var(--g-text-strong);
+}
+:root a.area-switch-link[aria-current="true"] {
+  background: var(--g-surface);
+  color: var(--g-text-strong);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--gimel-accent);
+}
+:root[data-theme="dark"] a.area-switch-link[aria-current="true"] {
+  box-shadow: inset 0 -2px 0 var(--gimel-accent-ink);
+}
+
+:root .sidebar-group {
+  margin-top: 14px;
+  padding-top: 0;
+  border-top: 0;
+}
+:root .sidebar-group + .sidebar-group {
+  padding-top: 0;
+  border-top: 0;
+}
+:root .sidebar-group.sidebar-group-tools {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--g-rule-soft);
+}
+:root .sidebar-group-title {
+  padding: 0 10px 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--g-muted);
+}
+:root .sidebar-links li + li {
+  margin-top: 1px;
+}
+:root a.sidebar-link {
+  height: var(--g-row-h);
+  min-height: var(--g-row-h);
+  box-sizing: border-box;
+  padding: 0 10px;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--g-text-2);
+  box-shadow: none;
+}
+:root a.sidebar-link > .bp5-icon {
+  color: var(--g-muted);
+  transition: color 120ms ease;
+}
+:root a.sidebar-link:hover {
+  background: rgb(var(--g-ink-rgb) / 0.045);
+  color: var(--g-text-strong);
+}
+:root a.sidebar-link:hover > .bp5-icon {
+  color: var(--g-text-2);
+}
+:root a.sidebar-link[aria-current="page"] {
+  background: var(--g-surface);
+  border-color: var(--g-rule-soft);
+  color: var(--g-text-strong);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--gimel-accent);
+}
+:root[data-theme="dark"] a.sidebar-link[aria-current="page"] {
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: inset 2px 0 0 var(--gimel-accent-ink);
+}
+:root a.sidebar-link[aria-current="page"] > .bp5-icon {
+  color: var(--gimel-accent-ink);
+}
+:root .sidebar-link-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root .sidebar-group-toggle {
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--g-muted);
+}
+:root .sidebar-group-toggle:hover {
+  background: rgb(var(--g-ink-rgb) / 0.045);
+  color: var(--g-text-strong);
+}
+
+/* Direkte Arbeitsplätze unter „Stationen". */
+.sidebar-stations {
+  margin-top: 4px;
+}
+.sidebar-stations-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--g-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-stations-toggle:hover {
+  background: rgb(var(--g-ink-rgb) / 0.045);
+  color: var(--g-text-strong);
+}
+.sidebar-stations-toggle[aria-disabled="true"] {
+  cursor: default;
+}
+.sidebar-stations-toggle[aria-disabled="true"]:hover {
+  background: none;
+  color: var(--g-muted);
+}
+.sidebar-stations-toggle:focus-visible {
+  outline: 2px solid var(--gimel-accent-ink);
+  outline-offset: -2px;
+}
+.sidebar-station-list {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0 0 0 8px;
+  border-left: 1px solid var(--g-rule-soft);
+  margin-left: 15px;
+}
+.sidebar-station-list li + li {
+  margin-top: 1px;
+}
+.sidebar-station-note {
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--g-muted);
+}
+a.sidebar-station-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: var(--g-text-2);
+  text-decoration: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+a.sidebar-station-link:hover {
+  background: rgb(var(--g-ink-rgb) / 0.045);
+  color: var(--g-text-strong);
+  text-decoration: none;
+}
+a.sidebar-station-link[aria-current="page"] {
+  background: var(--g-surface);
+  border-color: var(--g-rule-soft);
+  color: var(--g-text-strong);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--gimel-accent);
+}
+:root[data-theme="dark"] a.sidebar-station-link[aria-current="page"] {
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: inset 2px 0 0 var(--gimel-accent-ink);
+}
+.sidebar-station-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  flex: 0 0 auto;
+  background: var(--g-rule-strong);
+}
+.sidebar-station-mark.is-busy {
+  background: var(--gimel-accent);
+}
+:root[data-theme="dark"] .sidebar-station-mark.is-busy {
+  background: var(--gimel-accent-ink);
+}
+.sidebar-station-qty {
+  font-family: var(--g-font-sans);
+  font-size: 11px;
+  color: var(--g-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Einheitliche Unter-Navigation für Stationen (Grundriss/Vorrat/Fluss/Optimierung)
+   sowie Schachtel-Logik (Auftrags-Schachteln/Freies Schachteln/Zeichnungen). */
+.subnav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  border-bottom: 1px solid var(--g-rule-soft);
+}
+.subnav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+:root a.subnav-tab,
+:root .subnav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--g-text-2);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+:root a.subnav-tab > .bp5-icon,
+:root .subnav-tab > .bp5-icon {
+  color: var(--g-muted);
+}
+:root a.subnav-tab:hover,
+:root .subnav-tab:hover {
+  color: var(--g-text-strong);
+  text-decoration: none;
+}
+:root a.subnav-tab:hover > .bp5-icon,
+:root .subnav-tab:hover > .bp5-icon {
+  color: var(--g-text-2);
+}
+:root a.subnav-tab[aria-current="page"],
+:root .subnav-tab.is-current {
+  color: var(--g-text-strong);
+  font-weight: 600;
+  border-bottom-color: var(--gimel-accent);
+}
+:root[data-theme="dark"] a.subnav-tab[aria-current="page"],
+:root[data-theme="dark"] .subnav-tab.is-current {
+  border-bottom-color: var(--gimel-accent-ink);
+}
+:root a.subnav-tab[aria-current="page"] > .bp5-icon,
+:root .subnav-tab.is-current > .bp5-icon {
+  color: var(--gimel-accent-ink);
+}
+.subnav-right {
+  display: flex;
+  align-items: center;
+  padding-bottom: 5px;
+}
+.subnav-bar-compact {
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 0 8px;
+}
+.subnav-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--g-text-2);
+  text-decoration: none;
+}
+.subnav-back:hover {
+  color: var(--g-text-strong);
+  text-decoration: none;
+}
+.subnav-sep {
+  color: var(--g-muted);
+  font-size: 12px;
+}
+.subnav-station-select select {
+  font-size: 12.5px;
+  color: var(--g-text-2);
+}
+
+/* Heute: gebündelte Handlungsbedarf-Reiter statt 4 gestapelter Warnboxen */
+.heute-focus-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--g-rule-soft);
+  background: var(--g-chrome);
+}
+.heute-focus-tabs::-webkit-scrollbar { display: none; }
+.heute-focus-tab {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+  gap: 5px;
+  padding: 6px 7px 8px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--g-text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.heute-focus-tab:hover {
+  color: var(--g-text-strong);
+}
+.heute-focus-tab.is-active {
+  color: var(--g-text-strong);
+  font-weight: 600;
+  border-bottom-color: var(--gimel-accent);
+}
+.heute-focus-tab.is-active.is-danger {
+  border-bottom-color: var(--g-danger);
+}
+.heute-focus-tab.is-active.is-warning {
+  border-bottom-color: var(--g-warning);
+}
+.heute-focus-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--g-surface-2);
+  color: var(--g-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.heute-focus-tab.is-danger .heute-focus-badge {
+  background: var(--g-danger-soft);
+  color: var(--g-danger-ink);
+}
+.heute-focus-tab.is-warning .heute-focus-badge {
+  background: var(--g-warning-soft);
+  color: var(--g-warning-ink);
+}
+.heute-rows-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 720px) {
+  :root .app-sidebar {
+    width: auto;
+    padding: 4px;
+    border-right: 0;
+  }
+  :root .sidebar-nav {
+    padding: 0;
+  }
+  :root .area-switch {
+    margin-bottom: 4px;
+    border: 1px solid var(--g-rule);
+    border-radius: 4px;
+  }
+  :root a.area-switch-link {
+    min-height: 44px;
+  }
+  :root .sidebar-group,
+  :root .sidebar-group.sidebar-group-tools {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+  :root a.sidebar-link {
+    height: auto;
+    min-height: 44px;
+  }
+  .sidebar-stations {
+    display: none;
+  }
+  .subnav-bar {
+    gap: 6px 10px;
+  }
+  .subnav-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: none;
+    gap: 14px;
+  }
+  :root a.subnav-tab,
+  :root .subnav-tab {
+    min-height: 40px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .subnav-right {
+    width: 100%;
+  }
+  .subnav-station-select,
+  .subnav-station-select select {
+    width: 100%;
+  }
+}
+
+/* Tabellen: klarer Kopf, feine Zeilenlinien, eindeutige Auswahl. */
+:root .table-scroll {
+  border: 1px solid var(--g-rule-soft);
+  border-radius: 6px;
+  background: var(--g-surface);
+}
+:root .bp5-html-table.data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+:root .app-main .bp5-html-table.data-table > thead > tr > th,
+:root .bp5-html-table.data-table thead th {
+  background: var(--g-chrome);
+  border-bottom: 1px solid var(--g-rule-soft);
+  box-shadow: none;
+}
+:root .bp5-html-table.data-table tbody td {
+  border-top: 1px solid var(--g-rule-soft);
+  box-shadow: none;
+}
+:root .bp5-html-table.data-table tbody tr:first-child td {
+  border-top: 0;
+}
+:root .bp5-html-table.data-table tbody tr.row-active td,
+:root .bp5-html-table.data-table tbody tr.row-active:hover > td {
+  background: var(--gimel-accent-wash);
+}
+:root .bp5-html-table.data-table tbody tr.row-active td:first-child {
+  box-shadow: inset 3px 0 0 var(--gimel-accent);
+}
+:root[data-theme="dark"] .bp5-html-table.data-table tbody tr.row-active td:first-child {
+  box-shadow: inset 3px 0 0 var(--gimel-accent-ink);
+}
+
+/* Karten, Abschnitte, Kennzahlen und Schritte: einheitliche 6-px-Radien und feine Linien. */
+:root :where(.ui-kpi, .heute-sec, .desk-step, .dispo-clock, .dispo-card, .stat-card, .lager-place, .ui-first-steps, .prod-card, .minimap-card, .queue-row, .sl-card, .stage-group, .stage-staged, .customer-standing, .aging) {
+  border-color: var(--g-rule-soft);
+  border-radius: 6px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+:root .ui-facts[role="group"] .ui-fact {
+  border-color: var(--g-rule-soft);
+  border-radius: 6px;
+}
+:root .heute-sec {
+  overflow: hidden;
+}
+:root .heute-rows li {
+  border-top-color: var(--g-rule-soft);
+}
+:root a.heute-row {
+  transition: background-color 120ms ease;
+}
+:root .desk-step {
+  overflow: hidden;
+}
+:root .desk-step-toggle {
+  border-radius: 0;
+  background: var(--g-chrome);
+}
+:root .desk-step-number {
+  border-radius: 5px;
+}
+
+/* Schublade & Dialoge: ruhiger Rahmen, klare Kopf-/Fußzeile. */
+:root .ui-drawer-overlay {
+  backdrop-filter: blur(2px);
+}
+:root .ui-drawer {
+  border-left-color: var(--g-rule-soft);
+}
+:root .ui-drawer-head,
+:root .ui-drawer-foot {
+  background: var(--g-chrome);
+  border-color: var(--g-rule-soft);
+}
+:root .bp5-dialog {
+  border: 1px solid var(--g-rule-soft);
+  border-radius: 8px;
+}
+:root .bp5-dialog.bp5-overlay-enter,
+:root .bp5-dialog.bp5-overlay-enter-active,
+:root .bp5-dialog.bp5-overlay-appear,
+:root .bp5-dialog.bp5-overlay-appear-active {
+  transform: none;
+}
+:root .bp5-dialog-header {
+  border-bottom: 1px solid var(--g-rule-soft);
+  border-radius: 7px 7px 0 0;
+  background: var(--g-chrome);
+  box-shadow: none;
+}
+:root .bp5-dialog-footer {
+  border-top: 1px solid var(--g-rule-soft);
+  border-radius: 0 0 7px 7px;
+  padding: 12px 16px;
+  margin: 0;
+  background: var(--g-chrome);
+}
+
+/* Reiter: saubere Grundlinie und klarer Abstand zwischen allen Reitern. */
+:root .bp5-tabs > .bp5-tab-list {
+  border-bottom: 1px solid var(--g-rule-soft);
+  gap: 14px;
+  flex-wrap: wrap;
+}
+:root .bp5-tabs > .bp5-tab-list > .bp5-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 8px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+:root .bp5-tab[aria-selected="true"] {
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--gimel-accent);
+}
+/* Breite Tabellen: erste Spalte beim horizontalen Scrollen verankern. */
+:root .table-scroll {
+  scrollbar-width: thin;
+}
+:root .table-scroll .bp5-html-table.data-table thead th:first-child,
+:root .table-scroll .bp5-html-table.data-table tbody td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+:root .table-scroll .bp5-html-table.data-table thead th:first-child {
+  z-index: 2;
+  background: var(--g-chrome);
+}
+:root .table-scroll .bp5-html-table.data-table tbody td:first-child {
+  background: var(--g-surface);
+}
+:root .table-scroll .bp5-html-table.data-table tbody tr:hover td:first-child {
+  background: var(--g-surface-2);
+}
+:root .table-scroll .bp5-html-table.data-table tbody tr.row-active td:first-child {
+  background: var(--gimel-accent-wash);
+}
+
+/* Eingaben & Knöpfe: abgestimmter Radius, weicher Fokus. */
+:root :where(.bp5-button, .bp5-input, .bp5-html-select select, .bp5-tag.bp5-minimal, .ui-filter-chip) {
+  border-radius: 5px;
+}
+:root .bp5-callout {
+  border-radius: 6px;
+}
+
+/* --------------------------------------------------------------------------
+   Arbeitsplatz-Fokusleiste (laufende / nächste Aufgabe direkt greifbar)
+   -------------------------------------------------------------------------- */
+:root .station-focus-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 18px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  background: var(--g-surface);
+  border: 1px solid var(--g-rule-soft);
+  border-left: 3px solid var(--gimel-accent);
+  border-radius: 6px;
+}
+:root .station-focus-bar.is-running {
+  border-left-color: var(--g-success-ink);
+  background: var(--g-surface);
+}
+:root .station-focus-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+:root .station-focus-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+}
+:root .station-focus-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  border-radius: 4px;
+  background: var(--g-surface-2);
+  color: var(--g-muted);
+  border: 1px solid var(--g-rule-soft);
+}
+:root .station-focus-badge.is-running {
+  background: var(--g-success-soft);
+  color: var(--g-success-ink);
+  border-color: color-mix(in srgb, var(--g-success) 45%, var(--g-rule-soft));
+}
+:root .station-focus-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--g-text);
+}
+:root .station-focus-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+@media (max-width: 720px) {
+  :root .station-focus-bar {
+    padding: 10px 12px;
+  }
+  :root .station-focus-actions {
+    width: 100%;
+  }
+  :root .station-focus-actions .bp5-button {
+    min-height: 36px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Digitale Laufkarte (Opt-in Netz-Freigabe & scannbarer QR-Code)
+   -------------------------------------------------------------------------- */
+:root .lk-share-pop {
+  width: min(344px, calc(100vw - 24px));
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+:root .lk-share-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--g-rule-soft);
+}
+:root .lk-share-title {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.25;
+}
+:root .lk-share-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+:root .lk-share-controls .bp5-control.bp5-switch {
+  margin-bottom: 0;
+  font-weight: 500;
+}
+:root .lk-share-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 0.85fr;
+  gap: 8px;
+}
+:root .lk-share-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--g-muted);
+}
+:root .lk-share-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--g-rule-soft);
+}
+:root .lk-share-qr {
+  align-self: center;
+  width: 148px;
+  height: 148px;
+  padding: 8px;
+  background: var(--g-paper);
+  border: 1px solid var(--g-rule-soft);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+:root .lk-share-qr svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+:root .lk-share-meta {
+  font-size: 11.5px;
+  text-align: center;
+}
+:root .lk-share-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+:root .lk-share-actions .bp5-button:first-child {
+  flex: 1;
+}
+
+/* Seitenrahmen-Plattenvorschau: SVG nie oben/unten abschneiden */
+:root .station-drawer .plate-preview-stage {
+  height: auto;
+  min-height: 170px;
+  padding: 10px 12px;
+}
+:root .station-drawer .plate-preview-svg svg {
+  max-width: 100%;
+  width: auto;
+  max-height: 250px;
+  height: auto;
+}
+
+/* MiniMap: Stationen auf Hover als Ziel erkennbar */
+:root .minimap-svg rect:hover {
+  opacity: 0.92;
+}
+
+/* Fokus-Ringe für Navigations- und Kartenziele (hell & dunkel ≥ 3:1). */
+:root a.sidebar-station-link:focus-visible,
+:root a.subnav-tab:focus-visible {
+  outline: 2px solid var(--gimel-accent-ink);
+  outline-offset: -2px;
+}
+:root .aging:focus-visible,
+:root .files-item:focus-visible,
+:root .station-kpis .stat-card:focus-visible {
+  outline: 2px solid var(--gimel-accent-ink);
+  outline-offset: 2px;
+}
+
+/* Dunkelansicht: Akzent-Kanten und -Markierungen in --gimel-accent-ink (WCAG 1.4.11 ≥ 3:1). */
+:root[data-theme="dark"] .bp5-tab[aria-selected="true"] {
+  box-shadow: inset 0 -2px 0 var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .bp5-tab-indicator-wrapper .bp5-tab-indicator {
+  background-color: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .station-focus-bar:not(.is-running) {
+  border-left-color: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .ui-kpi-active {
+  border-color: var(--gimel-accent-ink);
+  box-shadow: inset 0 -2px var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] a.ui-kpi-link:hover,
+:root[data-theme="dark"] button.ui-kpi-link:hover {
+  border-color: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .ui-kpi-dot-laeuft {
+  background: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .ui-first-steps {
+  border-color: color-mix(in srgb, var(--gimel-accent-ink) 40%, var(--g-rule));
+  border-left-color: var(--gimel-accent-ink);
+}
+:root[data-theme="dark"] .bp5-input:focus,
+:root[data-theme="dark"] .bp5-input.bp5-active {
+  box-shadow: inset 0 0 0 1px var(--gimel-accent-ink), 0 0 0 2px rgb(var(--gimel-accent-rgb) / 0.3), inset 0 1px 1px rgb(var(--g-ink-rgb) / 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root :where(.gimel-jump, a.area-switch-link, a.sidebar-station-link, a.subnav-tab, .ui-kpi, .heute-sec, .desk-step, .dispo-clock, .dispo-card, a.heute-row) {
+    transition: none;
+  }
+}
+
+

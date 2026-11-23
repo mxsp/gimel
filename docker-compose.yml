@@ -1,0 +1,76 @@
+# Gimel Dual-Mode Stack: Playground (Sandkasten) + Production (Echtbetrieb)
+#
+# Start BOTH side by side:
+#   docker compose up -d --build
+#
+# Start ONLY Playground (http://127.0.0.1:8040/app):
+#   docker compose up -d playground
+#
+# Start ONLY Production (http://127.0.0.1:8041/app):
+#   docker compose up -d postgres production
+
+services:
+  playground:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gimel:latest
+    container_name: gimel-playground
+    command: ["--mode", "playground", "--host", "0.0.0.0", "--port", "8040", "--no-browser"]
+    environment:
+      GIMEL_MODE: playground
+      GIMEL_PORT: "8040"
+      GIMEL_ENABLE_ROBOTS: "0"
+    ports:
+      - "127.0.0.1:8040:8040"
+    volumes:
+      - gimel_playground_data:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: gimel-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gimel}
+      POSTGRES_USER: ${POSTGRES_USER:-gimel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+    volumes:
+      - gimel_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gimel} -d ${POSTGRES_DB:-gimel}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  production:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gimel:latest
+    container_name: gimel-production
+    command: ["--mode", "production", "--host", "0.0.0.0", "--port", "8041", "--no-browser"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GIMEL_MODE: production
+      GIMEL_ENV: production
+      GIMEL_PORT: "8041"
+      GIMEL_ENABLE_ROBOTS: "0"
+      GIMEL_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-gimel}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-gimel}
+      GIMEL_SECRET_KEY: ${GIMEL_SECRET_KEY:-}
+      GIMEL_ALLOWED_HOSTS: ${GIMEL_ALLOWED_HOSTS:-127.0.0.1,localhost}
+      GIMEL_ADMIN_EMAIL: ${GIMEL_ADMIN_EMAIL:-admin@example.com}
+      GIMEL_ADMIN_PASSWORD: ${GIMEL_ADMIN_PASSWORD:-}
+      GIMEL_ADMIN_NAME: ${GIMEL_ADMIN_NAME:-Administrator}
+    ports:
+      - "127.0.0.1:8041:8041"
+    volumes:
+      - gimel_production_data:/data
+    restart: unless-stopped
+
+volumes:
+  gimel_playground_data:
+  gimel_production_data:
+  gimel_pg_data:

@@ -1,0 +1,131 @@
+/* Spracheingabe (task 43): eine Leiste für Voice/Live, Lab-Chat, Portal-Dock und Studio.
+   Farben nur aus den Lab- und Gimel-Tokens (hell und dunkel in beiden Bauten definiert). */
+
+.vi-panel {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  margin: 0 0 6px;
+  border: 1px solid var(--lab-line-strong);
+  border-radius: 8px;
+  background: var(--lab-surface);
+  color: var(--lab-text);
+  font-size: 13px;
+}
+.vi-panel[data-phase="listening"] { border-color: var(--lab-accent); }
+.vi-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.vi-actions { justify-content: flex-end; }
+.vi-state { flex: 1 1 auto; min-width: 0; }
+.vi-time { color: var(--lab-muted); font-variant-numeric: tabular-nums; }
+.vi-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex: none;
+  background: var(--lab-muted);
+}
+.vi-panel[data-phase="listening"] .vi-dot { background: var(--lab-danger); }
+.vi-dot.is-heard { box-shadow: 0 0 0 3px var(--g-danger-soft); }
+@media (prefers-reduced-motion: no-preference) {
+  .vi-panel[data-phase="listening"] .vi-dot { animation: vi-pulse 1.2s ease-in-out infinite; }
+  @keyframes vi-pulse { 50% { opacity: 0.45; } }
+}
+
+.vi-meter-row { display: flex; align-items: center; gap: 8px; }
+.vi-meter-row .vi-meter { flex: 1; }
+.vi-meter {
+  position: relative;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--lab-surface-2);
+  border: 1px solid var(--lab-line);
+  overflow: hidden;
+}
+.vi-meter-fill {
+  position: absolute; inset: 0 auto 0 0;
+  background: var(--lab-muted);
+  transition: width 60ms linear;
+}
+.vi-meter-fill.is-voice { background: var(--g-success); }
+.vi-meter-thr {
+  position: absolute; top: -1px; bottom: -1px; width: 2px;
+  background: var(--lab-text);
+  box-shadow: 0 0 0 1px var(--lab-surface);
+}
+.vi-meter-db {
+  min-width: 5.5ch; text-align: right;
+  font: 11px/1 var(--g-font-mono, ui-monospace, monospace);
+  color: var(--lab-muted);
+}
+.vi-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.vi-dev-name {
+  flex: 1 1 120px; min-width: 0;
+  color: var(--lab-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vi-device { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.vi-device > span { color: var(--lab-muted); }
+.vi-device.is-compact > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.vi-device select {
+  max-width: 220px; min-height: 32px;
+  border: 1px solid var(--lab-muted); border-radius: 6px;
+  background: var(--lab-surface); color: var(--lab-text);
+  font: inherit; padding: 2px 6px;
+}
+
+.vi-btn {
+  min-height: 32px; padding: 0 12px;
+  border: 1px solid var(--lab-line-strong); border-radius: 6px;
+  background: var(--lab-surface); color: var(--lab-text);
+  font: inherit; cursor: pointer;
+}
+.vi-btn:hover { background: var(--lab-surface-2); }
+.vi-btn.is-primary { background: var(--gimel-accent); border-color: var(--gimel-accent); color: var(--gimel-on-accent); }
+.vi-btn.is-primary:hover { background: var(--gimel-accent-hover); }
+.vi-btn:focus-visible, .vi-device select:focus-visible { outline: 2px solid var(--lab-accent-ink); outline-offset: 2px; }
+
+.vi-problem { display: grid; gap: 6px; color: var(--g-danger-ink, var(--lab-danger)); }
+.vi-problem > span { line-height: 1.4; }
+
+.vi-panel.is-compact { font-size: 12.5px; padding: 6px 8px; }
+@media (max-width: 420px) {
+  .vi-device select { max-width: 160px; }
+  .vi-dev-name { display: none; }
+}
+
+/* Chat | Live (Owner 2026-11-08: „classic chat and live“) */
+.vi-mode {
+  display: inline-flex; align-self: flex-start; gap: 2px; padding: 2px; margin: 0 0 6px;
+  border: 1px solid var(--lab-muted); border-radius: 8px; background: var(--lab-surface);
+}
+.vi-mode-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 28px; padding: 0 12px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--lab-text); font: inherit; font-size: 13px; cursor: pointer;
+}
+.vi-mode-btn:hover:not(:disabled):not(.is-on) { background: var(--lab-surface-2); }
+.vi-mode-btn.is-on { background: var(--gimel-accent); color: var(--gimel-on-accent); }
+.vi-mode-btn:disabled { color: var(--lab-muted); cursor: not-allowed; }
+.vi-mode-btn:focus-visible { outline: 2px solid var(--lab-accent-ink); outline-offset: 2px; }
+
+.vi-livepanel {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; min-height: 72px;
+}
+.vi-orb {
+  flex: none; width: 52px; height: 52px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 0; background: var(--gimel-accent); color: var(--gimel-on-accent); cursor: pointer;
+  transition: box-shadow 80ms linear;
+}
+.vi-orb:hover:not(:disabled) { background: var(--gimel-accent-hover); }
+.vi-orb:disabled { opacity: 0.6; cursor: progress; }
+.vi-orb:focus-visible { outline: 2px solid var(--lab-accent-ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: no-preference) {
+  .vi-orb[data-state="thinking"] { animation: vi-pulse 1.2s ease-in-out infinite; }
+}
+.vi-live-body { flex: 1 1 auto; min-width: 0; display: grid; gap: 6px; }
+.vi-live-state { font-size: 14px; font-weight: 600; color: var(--lab-text); }
+.vi-live-hint { font-size: 12px; line-height: 1.35; color: var(--lab-muted); overflow-wrap: anywhere; }
+@media (max-width: 420px) {
+  .vi-livepanel { gap: 8px; padding: 8px; }
+  .vi-orb { width: 44px; height: 44px; }
+}

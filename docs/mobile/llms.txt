@@ -1,0 +1,17 @@
+# Gimel Mobile
+
+> Docs for building the Gimel Android app (Google Pixel 8, native APK with ARCore) against the
+> Gimel REST API. Docs only so far; no app code exists. LAN-only product, German UI.
+
+Read in this order:
+
+- [README](README.md): index, trust level of each file, rules
+- [Plan](PLAN.md): steps 0 and A–G, decisions, risks
+- [Android APK spec](ANDROID-APK.md): architecture, trust, session, AR, positioning, privacy
+- [Copilot / Agent API](AGENT-API.md): chats, SSE events, context, UI actions, voice, gaps
+- [All current routes](API-CURRENT.md): 357 operations, new ones marked
+- [OpenAPI](openapi.json): exact schemas (375 KB)
+
+## Legacy
+
+- [GIMEL.md](GIMEL.md): product, auth §5, domain model. Built from old code; no agent routes, old 3D. Newer files win.
