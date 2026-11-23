@@ -4,13 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gimel"
-version = "0.2.9"
-description = "Order, nesting, and production management for sheet-cutting manufacturers (Playground & Production)"
+version = "0.3.0"
+description = "Order and production management for manufacturers and job shops (in development, not released)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
-authors = [{ name = "mxsp / FyreFly Systems GbR" }]
-keywords = ["erp", "mes", "manufacturing", "nesting", "dxf", "digital-twin"]
+license = { text = "MIT" }
+authors = [{ name = "FyreFly Systems GbR" }]
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
@@ -29,16 +28,15 @@ dependencies = [
   "pypdf>=5.0",
 ]
 
-[project.urls]
-Homepage = "https://github.com/mxsp/gimel"
-Repository = "https://github.com/mxsp/gimel"
-Issues = "https://github.com/mxsp/gimel/issues"
-
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27", "opencv-python-headless>=4.9"]
 vision = ["opencv-python-headless>=4.9"]
 tts = ["edge-tts>=7.0"]
-# Optional local voice extra; piper-tts is GPL-3.0 (see THIRD_PARTY_LICENSES.md).
+# Gimel Voice: Erkennung und Sprachausgabe auf diesem Rechner. av < 15, weil
+# faster-whisper 1.2 av.open(metadata_errors=…) aufruft, das av 15+ nicht kennt.
+# piper-tts ist GPL-3.0 (eigenständiges Paket, wird nur importiert); vor einer
+# Weitergabe von Gimel in LICENCES aufnehmen. edge-tts (Microsoft-Cloud) bleibt
+# bewusst nur in [tts].
 voice = ["faster-whisper>=1.1,<2", "av>=13,<15", "piper-tts>=1.3,<2"]
 
 [project.scripts]

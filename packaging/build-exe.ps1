@@ -61,8 +61,7 @@ start "" "%~dp0Gimel.exe" --target production %*
 
         @"
 @echo off
-"%~dp0gimel-cli.exe" --mode both %*
-pause
+start "" "%~dp0Gimel.exe" %*
 "@ | Set-Content -Encoding ASCII "$BundleDir\Start-Gimel-Both.bat"
 
         @"

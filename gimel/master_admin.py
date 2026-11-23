@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import urllib.request
+import webbrowser
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -138,6 +139,85 @@ def create_account(
                     entity="user",
                     entity_id=str(u.id),
                     detail={"username": uname, "role": role, "env": env},
+                )
+            )
+            db.commit()
+            return _serialize_user(u, 0)
+    finally:
+        engine.dispose()
+
+
+def upsert_account(
+    base_dir: Path,
+    env: EnvName,
+    *,
+    username: str,
+    password: str,
+    role: str = "admin",
+    name: str = "",
+) -> dict:
+    uname = username.strip().lower()
+    if not uname or len(uname) < 2 or " " in uname:
+        raise ValueError("Benutzername muss mindestens 2 Zeichen lang sein (ohne Leerzeichen).")
+    if len(password) < 8:
+        raise ValueError("Passwort muss mindestens 8 Zeichen lang sein.")
+    if role not in VALID_ROLES:
+        raise ValueError(f"Ungültige Rolle: {role}")
+
+    engine, Session = _open_session(base_dir, env)
+    try:
+        with Session() as db:
+            u = db.query(User).filter(User.email == uname).first()
+            if u is not None:
+                u.password_hash = hash_password(password)
+                u.role = role
+                u.active = True
+                u.email_verified = True
+                u.failed_login_count = 0
+                u.locked_until = None
+                u.mfa_failed_count = 0
+                u.mfa_locked_until = None
+                if name.strip():
+                    u.name = name.strip()
+                db.add(
+                    AuditLog(
+                        actor="master-admin-desktop",
+                        action="master_account_upsert",
+                        entity="user",
+                        entity_id=str(u.id),
+                        detail={"username": uname, "role": role, "env": env, "updated": True},
+                    )
+                )
+                db.commit()
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                sess_cnt = (
+                    db.query(AuthSession)
+                    .filter(
+                        AuthSession.user_id == u.id,
+                        AuthSession.revoked_at.is_(None),
+                        AuthSession.expires_at > now,
+                    )
+                    .count()
+                )
+                return _serialize_user(u, sess_cnt)
+
+            u = User(
+                email=uname,
+                password_hash=hash_password(password),
+                name=(name or uname).strip(),
+                role=role,
+                active=True,
+                email_verified=True,
+            )
+            db.add(u)
+            db.flush()
+            db.add(
+                AuditLog(
+                    actor="master-admin-desktop",
+                    action="master_account_upsert",
+                    entity="user",
+                    entity_id=str(u.id),
+                    detail={"username": uname, "role": role, "env": env, "created": True},
                 )
             )
             db.commit()
@@ -645,6 +725,22 @@ loadStatus();
 """
 
 
+def _hidden_popen_kwargs() -> dict:
+    """Return subprocess.Popen kwargs that suppress console windows on Windows."""
+    kwargs: dict = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0x00000001)
+        si.wShowWindow = 0  # SW_HIDE
+        kwargs["startupinfo"] = si
+    return kwargs
+
+
 class MasterAdminController:
     """Manages local Gimel server subprocesses and serves the localhost Master Admin UI."""
 
@@ -671,7 +767,12 @@ class MasterAdminController:
         port = self._port_for(mode)
         if not self.is_running(mode):
             if getattr(sys, "frozen", False):
-                cmd = [sys.executable]
+                exe = Path(sys.executable)
+                if os.name == "nt":
+                    gimel_gui = exe.with_name("Gimel.exe")
+                    if gimel_gui.is_file():
+                        exe = gimel_gui
+                cmd = [str(exe)]
             else:
                 cmd = [sys.executable, "-m", "gimel.launcher"]
             cmd += [
@@ -681,15 +782,35 @@ class MasterAdminController:
                 "--data-dir", str(self.base_dir),
                 "--no-browser",
             ]
-            kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-            if os.name == "nt":
-                kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            proc = subprocess.Popen(cmd, **kwargs)
+            proc = subprocess.Popen(cmd, **_hidden_popen_kwargs())
             with self._lock:
                 self._procs[mode] = proc
             if not _wait_health(port, timeout=25.0):
                 raise RuntimeError(f"Gimel {mode} konnte auf Port {port} nicht gestartet werden.")
         return f"http://127.0.0.1:{port}"
+
+    def open_url_window(self, url: str) -> None:
+        """Open *url* in a standalone app window (Edge/Chrome --app= or default browser) without closing Master Admin."""
+        from .desktop import _find_app_browser
+
+        browser = _find_app_browser()
+        if browser:
+            profile_dir = self.base_dir / "desktop-profile"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                browser,
+                f"--app={url}",
+                "--window-size=1440,920",
+                f"--user-data-dir={profile_dir}",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ]
+            try:
+                subprocess.Popen(cmd, **_hidden_popen_kwargs())
+                return
+            except OSError:
+                pass
+        webbrowser.open(url)
 
     def stop_mode(self, mode: EnvName) -> None:
         with self._lock:

@@ -26,6 +26,8 @@ import threading
 import wave
 from pathlib import Path
 
+from gimel.win_subproc import hidden_subprocess_kwargs
+
 BACKENDS = ("lokal", "edge")
 DEFAULT_BACKEND = "lokal"
 
@@ -158,6 +160,7 @@ def install_piper(voice: str = PIPER_DEFAULT) -> dict:
             capture_output=True,
             text=True,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
         if res.returncode != 0:
             detail = (res.stderr or res.stdout or "").strip()[-400:]
@@ -173,6 +176,7 @@ def install_piper(voice: str = PIPER_DEFAULT) -> dict:
             capture_output=True,
             text=True,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
         if dl.returncode != 0:
             detail = (dl.stderr or dl.stdout or "").strip()[-400:]

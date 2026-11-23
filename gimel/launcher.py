@@ -25,11 +25,37 @@ import webbrowser
 from pathlib import Path
 from typing import Literal
 
+from .win_subproc import hidden_subprocess_kwargs
+
 Mode = Literal["playground", "production", "both", "setup-ui", "desktop"]
 
 DEFAULT_HOST = "0.0.0.0"
 PLAYGROUND_PORT = 8040
 PRODUCTION_PORT = 8041
+
+
+def _ensure_valid_stdio(base_dir: Path) -> None:
+    """Ensure sys.stdout and sys.stderr are valid streams when running in console=False mode."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        log_dir = (
+            Path(os.environ.get("LOCALAPPDATA", str(base_dir))) / "Gimel" / "logs"
+            if os.name == "nt"
+            else base_dir / "logs"
+        )
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = (log_dir / "gimel-launcher.log").open("a", encoding="utf-8", buffering=1)
+        if sys.stdout is None:
+            sys.stdout = log_file  # type: ignore[assignment]
+        if sys.stderr is None:
+            sys.stderr = log_file  # type: ignore[assignment]
+    except OSError:
+        devnull = open(os.devnull, "w", encoding="utf-8")
+        if sys.stdout is None:
+            sys.stdout = devnull  # type: ignore[assignment]
+        if sys.stderr is None:
+            sys.stderr = devnull  # type: ignore[assignment]
 
 
 def _default_base_dir() -> Path:
@@ -203,10 +229,12 @@ def run_single(
     base_dir: Path,
     reset: bool = False,
     no_browser: bool = False,
+    init_only: bool = False,
     admin_email: str = "",
     admin_password: str = "",
     admin_name: str = "Administrator",
 ) -> int:
+    _ensure_valid_stdio(base_dir)
     data_dir = _mode_data_dir(base_dir, mode)
     _configure_env_before_import(mode, data_dir, host)
 
@@ -217,6 +245,8 @@ def run_single(
 
     if mode == "playground":
         email, password = _prepare_playground(data_dir, reset=reset)
+        if init_only:
+            return 0
         print("=" * 64)
         print("  GIMEL PLAYGROUND (Sandkasten · Musterwerk GmbH)")
         print(f"  Lokal:    {local_url}")
@@ -229,7 +259,7 @@ def run_single(
         print("=" * 64)
     else:
         rc = _prepare_production(admin_email, admin_password, admin_name)
-        if rc != 0:
+        if rc != 0 or init_only:
             return rc
         print("=" * 64)
         print("  GIMEL PRODUCTION (Echtbetrieb)")
@@ -264,6 +294,8 @@ def run_both(
     admin_name: str = "",
 ) -> int:
     """Launch isolated Playground and Production instances side by side."""
+    windowed = sys.stdout is None or sys.stderr is None
+    _ensure_valid_stdio(base_dir)
     if getattr(sys, "frozen", False):
         base_cmd = [sys.executable]
     else:
@@ -295,7 +327,14 @@ def run_both(
             prod_cmd += ["--admin-name", admin_name]
 
     print(f"Starte Gimel Playground (:{playground_port}) und Production (:{production_port}) …")
-    procs = [subprocess.Popen(pg_cmd), subprocess.Popen(prod_cmd)]
+    popen_kwargs: dict = {**hidden_subprocess_kwargs()}
+    if windowed:
+        popen_kwargs["stdout"] = subprocess.DEVNULL
+        popen_kwargs["stderr"] = subprocess.DEVNULL
+    procs = [
+        subprocess.Popen(pg_cmd, **popen_kwargs),
+        subprocess.Popen(prod_cmd, **popen_kwargs),
+    ]
 
     def _shutdown(*_args):
         for proc in procs:
@@ -363,6 +402,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", default=None, help="Basisordner für playground/ und production/")
     parser.add_argument("--reset", action="store_true", help="Playground-Datenbank vor Start zurücksetzen")
     parser.add_argument("--no-browser", action="store_true", default=os.environ.get("GIMEL_NO_BROWSER") == "1")
+    parser.add_argument(
+        "--init-only",
+        action="store_true",
+        help="Nur Datenbank & Admin-Konto initialisieren und sofort beenden (ohne Webserver)",
+    )
     parser.add_argument("--admin-user", "--admin-email", dest="admin_email", default="")
     parser.add_argument("--admin-password", default="")
     parser.add_argument("--admin-name", default="")
@@ -370,6 +414,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     mode: Mode = args.mode or _pick_mode_interactive()
     base_dir = Path(args.data_dir).expanduser() if args.data_dir else _default_base_dir()
+
+    if args.init_only and mode in ("playground", "production"):
+        port = args.port or (PLAYGROUND_PORT if mode == "playground" else PRODUCTION_PORT)
+        return run_single(
+            mode,
+            host=args.host,
+            port=port,
+            base_dir=base_dir,
+            reset=args.reset,
+            no_browser=True,
+            init_only=True,
+            admin_email=args.admin_email,
+            admin_password=args.admin_password,
+            admin_name=args.admin_name,
+        )
 
     if mode == "desktop":
         from . import desktop
@@ -413,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         base_dir=base_dir,
         reset=args.reset,
         no_browser=args.no_browser,
+        init_only=args.init_only,
         admin_email=args.admin_email,
         admin_password=args.admin_password,
         admin_name=args.admin_name,

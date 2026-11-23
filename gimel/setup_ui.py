@@ -23,6 +23,7 @@ from pathlib import Path
 from . import launcher
 from .localnet import local_lan_ips
 from .version import APP_VERSION
+from .win_subproc import hidden_subprocess_kwargs
 
 
 def _detect_deps() -> dict:
@@ -35,7 +36,14 @@ def _detect_deps() -> dict:
     docker_running = False
     if shutil.which("docker"):
         try:
-            r = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=1.5, check=False)
+            r = subprocess.run(
+                ["docker", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+                check=False,
+                **hidden_subprocess_kwargs(),
+            )
             if r.returncode == 0:
                 docker_ok = True
                 docker_version = (r.stdout or r.stderr or "").strip().splitlines()[0].strip()
@@ -43,7 +51,13 @@ def _detect_deps() -> dict:
             pass
         if docker_ok:
             try:
-                chk = subprocess.run(["docker", "info"], capture_output=True, timeout=1.5, check=False)
+                chk = subprocess.run(
+                    ["docker", "info"],
+                    capture_output=True,
+                    timeout=1.5,
+                    check=False,
+                    **hidden_subprocess_kwargs(),
+                )
                 docker_running = chk.returncode == 0
             except Exception:  # noqa: BLE001
                 docker_running = False
@@ -73,23 +87,36 @@ def _install_missing_deps(install_python: bool = True, install_docker: bool = Tr
         ]
         ps1 = next((p for p in candidates if p.is_file()), None)
         if ps1 is not None:
-            cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1)]
+            cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", str(ps1)]
             if need_py:
                 cmd.append("-InstallPython")
             if need_dk:
                 cmd.append("-InstallDocker")
-            subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+                **hidden_subprocess_kwargs(),
+            )
             notes.append("Windows-Abhängigkeitsinstallation ausgeführt.")
         else:
             if need_py and shutil.which("winget"):
                 subprocess.run(
                     ["winget", "install", "--id", "Python.Python.3.12", "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
-                    capture_output=True, timeout=300, check=False,
+                    capture_output=True,
+                    timeout=300,
+                    check=False,
+                    **hidden_subprocess_kwargs(),
                 )
             if need_dk and shutil.which("winget"):
                 subprocess.run(
                     ["winget", "install", "--id", "Docker.DockerDesktop", "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
-                    capture_output=True, timeout=300, check=False,
+                    capture_output=True,
+                    timeout=300,
+                    check=False,
+                    **hidden_subprocess_kwargs(),
                 )
     elif platform.system().lower() == "darwin":
         if shutil.which("brew"):
@@ -450,13 +477,16 @@ def _create_setup_server(port: int, root_dir: Path) -> tuple[ThreadingHTTPServer
 
             desktop_mod.save_desktop_config(root_dir, default_mode=mode, host=host)
 
-            kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+            kwargs: dict = {
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                **hidden_subprocess_kwargs(),
+            }
             if os.name == "nt":
                 kwargs["creationflags"] = (
-                    subprocess.DETACHED_PROCESS
-                    | subprocess.CREATE_NEW_PROCESS_GROUP
-                    | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                )  # type: ignore[attr-defined]
+                    kwargs.get("creationflags", 0)
+                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                )
             else:
                 kwargs["start_new_session"] = True
             subprocess.Popen(cmd, **kwargs)

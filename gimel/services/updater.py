@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Literal
 
 from ..version import APP_VERSION
+from ..win_subproc import hidden_subprocess_kwargs
 
 DEFAULT_UPDATE_REPO = "mxsp/gimel"
 CACHE_TTL_SECONDS = 5 * 60
@@ -422,6 +423,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
         capture_output=True,
         text=True,
         check=False,
+        **hidden_subprocess_kwargs(),
     )
     stashed = False
     if dirty.stdout.strip():
@@ -430,6 +432,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
             capture_output=True,
             text=True,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
         if st.returncode != 0:
             return UpdateResult(
@@ -448,6 +451,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
         capture_output=True,
         text=True,
         check=False,
+        **hidden_subprocess_kwargs(),
     )
     if fetch.returncode != 0:
         return UpdateResult(
@@ -463,6 +467,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
         capture_output=True,
         text=True,
         check=False,
+        **hidden_subprocess_kwargs(),
     )
     if co.returncode != 0:
         return UpdateResult(
@@ -479,6 +484,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
         capture_output=True,
         text=True,
         check=False,
+        **hidden_subprocess_kwargs(),
     )
     if pip_res.returncode != 0:
         subprocess.run(
@@ -486,6 +492,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
             capture_output=True,
             text=True,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
 
     if rebuild_web and shutil.which("npm"):
@@ -500,6 +507,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
                     capture_output=True,
                     text=True,
                     check=False,
+                    **hidden_subprocess_kwargs(),
                 )
             if (web_dir / "node_modules").is_dir():
                 b = subprocess.run(
@@ -508,6 +516,7 @@ def _apply_git_update(info: UpdateStatus, *, target_tag: str | None = None, rebu
                     capture_output=True,
                     text=True,
                     check=False,
+                    **hidden_subprocess_kwargs(),
                 )
                 if b.returncode != 0:
                     return UpdateResult(
@@ -619,12 +628,17 @@ def schedule_restart(delay_seconds: float = 1.1) -> bool:
                     'del "%~f0" >NUL 2>&1\r\n',
                     encoding="utf-8",
                 )
+                win_kwargs = hidden_subprocess_kwargs()
+                win_kwargs["creationflags"] = (
+                    win_kwargs.get("creationflags", 0)
+                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                )
                 subprocess.Popen(
                     ["cmd", "/c", str(bat)],
                     env=child_env,
-                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    **win_kwargs,
                 )
             else:
                 # Pure POSIX /bin/sh helper: works for BOTH frozen binaries and Python venvs.

@@ -58,6 +58,11 @@ hiddenimports = [
     "jwt",
     "cryptography",
     "pydantic_settings",
+    "tkinter",
+    "tkinter.ttk",
+    "tkinter.messagebox",
+    "tkinter.simpledialog",
+    "_tkinter",
 ]
 
 # On Windows, bundle pywebview + WebView2 bindings when installed so Gimel.exe
@@ -86,7 +91,7 @@ if USE_ONEDIR:
         hookspath=[],
         hooksconfig={},
         runtime_hooks=[],
-        excludes=["tkinter", "matplotlib", "pytest", "cv2", "PIL.ImageTk"],
+        excludes=["matplotlib", "pytest", "cv2", "PIL.ImageTk"],
         noarchive=False,
     )
     a_cli = Analysis(
@@ -98,7 +103,7 @@ if USE_ONEDIR:
         hookspath=[],
         hooksconfig={},
         runtime_hooks=[],
-        excludes=["tkinter", "matplotlib", "pytest", "cv2", "PIL.ImageTk"],
+        excludes=["matplotlib", "pytest", "cv2", "PIL.ImageTk"],
         noarchive=False,
     )
     MERGE((a_desktop, "Gimel", "Gimel"), (a_cli, "gimel-cli", "gimel-cli"))
@@ -157,7 +162,7 @@ else:
         hookspath=[],
         hooksconfig={},
         runtime_hooks=[],
-        excludes=["tkinter", "matplotlib", "pytest", "cv2", "PIL.ImageTk"],
+        excludes=["matplotlib", "pytest", "cv2", "PIL.ImageTk"],
         noarchive=False,
     )
     pyz = PYZ(a.pure)

@@ -237,6 +237,19 @@ def run_desktop(
     effective_host = host or str(cfg.get("host") or launcher.DEFAULT_HOST)
     resolved = resolve_desktop_target(target, root_dir)
 
+    if resolved in ("master", "setup"):
+        try:
+            from . import desktop_gui
+
+            return desktop_gui.run_native_desktop_gui(
+                root_dir,
+                host=effective_host,
+                initial_view=resolved,
+            )
+        except Exception:  # noqa: BLE001
+            # Fallback only when tkinter is unavailable on a headless Linux host
+            pass
+
     shutdown_cb = lambda: None  # noqa: E731
     if resolved == "master":
         from . import master_admin
@@ -312,6 +325,8 @@ def run_desktop(
     _wait_until_ready(health_url, timeout_seconds=35.0)
     browser = _find_app_browser()
     if browser:
+        from .master_admin import _hidden_popen_kwargs
+
         profile_dir = root_dir / "desktop-profile"
         profile_dir.mkdir(parents=True, exist_ok=True)
         cmd = [
@@ -323,7 +338,7 @@ def run_desktop(
             "--no-default-browser-check",
         ]
         try:
-            proc = subprocess.Popen(cmd)
+            proc = subprocess.Popen(cmd, **_hidden_popen_kwargs())
             proc.wait()
         finally:
             shutdown_cb()
