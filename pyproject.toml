@@ -45,10 +45,11 @@ voice = ["faster-whisper>=1.1,<2", "av>=13,<15", "piper-tts>=1.3,<2"]
 gimel = "gimel.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["gimel*"]
+include = ["gimel*", "agentlab*"]
 
 [tool.setuptools.package-data]
 gimel = ["admin/*", "webapp/dist/**/*", "twin/dist/**/*", "studio/dist/**/*"]
+agentlab = ["webapp/dist/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
