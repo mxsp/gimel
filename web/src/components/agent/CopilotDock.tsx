@@ -541,7 +541,7 @@ export default function CopilotDock({ open, onClose, user, reserve = 230, minMai
         )}
         <div className="copilot-head agent-popup-head">
           <span className="agent-popup-brand">
-            <BotSmiley size={24} variant="brand" trackMouse />
+            <BotSmiley size={24} variant="brand" character="lab" trackMouse />
             <span className="agent-popup-title">
               <strong>{current?.agent_name || "Assistent"}</strong>
               <span>{current?.agent_name ? "Spezialist · Gimel" : "Gimel Copilot"}</span>

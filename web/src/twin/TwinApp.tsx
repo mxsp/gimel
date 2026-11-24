@@ -86,7 +86,7 @@ export default function TwinApp() {
         <aside className="twin-rail-sidebar" aria-label="Grundriss-Navigation">
           <div className="rail-top">
             <a className="rail-brand" href="#/grundriss" aria-label="Digitaler Grundriss">
-              <BotSmiley size={30} variant="brand" trackMouse />
+              <BotSmiley size={30} variant="brand" character="twin" trackMouse />
               <span className="rail-brand-text">
                 <strong>Grundriss</strong>
                 <span>Gimel</span>

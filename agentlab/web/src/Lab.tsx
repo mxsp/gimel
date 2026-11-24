@@ -671,7 +671,7 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
       return (
         <div className="lab-page">
           <div className="empty-chat standalone">
-            <BotSmiley size={48} variant="hero" trackMouse title="Klick mich!" />
+            <BotSmiley size={48} variant="hero" character="lab" trackMouse title="Klick mich!" />
             <strong>Noch kein Chat</strong>
             <p>Legen Sie einen Chat an und fragen Sie nach Aufträgen, Fertigung, Lager oder Stammdaten.</p>
             <Button intent="primary" icon="add" text="Neuen Chat anlegen" onClick={() => newChat(false, newChatKind)} loading={busy} />
@@ -709,7 +709,7 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
         <aside className="lab-sidebar">
           <div className="lab-side-top">
             <a className="lab-brand" href="#chat" onClick={(e) => { e.preventDefault(); setView("chat"); }}>
-              <BotSmiley size={31} variant="brand" trackMouse />
+              <BotSmiley size={31} variant="brand" character="lab" trackMouse />
               <span className="lab-brand-text">
                 <strong>Agent Lab</strong>
                 <span>Gimel</span>
@@ -962,7 +962,7 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
           <div className="drawer-backdrop" onClick={() => setDrawer(false)} />
           <aside className="drawer" role="dialog" aria-label="Assistent">
             <div className="drawer-head">
-              <span className="drawer-head-title"><BotSmiley size={22} variant="brand" /> Assistent</span>
+              <span className="drawer-head-title"><BotSmiley size={22} variant="brand" character="lab" /> Assistent</span>
               <select aria-label="Chat wählen" value={currentId ?? ""}
                 onChange={(e) => setCurrentId(Number(e.target.value) || null)}>
                 {chats.map((chat) => <option key={chat.id} value={chat.id}>{chat.title}</option>)}

@@ -72,7 +72,7 @@ export default function SideNavigation({ route, role, features, area, onArea, us
     </button>
     <div className="rail-top">
       <a className="rail-brand" href="#/heute" aria-label="ERP Portal, zu Heute">
-        <BotSmiley size={30} variant="brand" trackMouse />
+        <BotSmiley size={30} variant="brand" character="erp" trackMouse />
         <span className="rail-brand-text">
           <strong>ERP Portal</strong>
           <span>Gimel</span>

@@ -1138,7 +1138,7 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
       <aside className="studio-left" aria-label="Aufbau" hidden={kiosk || !leftOpen}>
         <div className="rail-top">
           <a className="rail-brand" href="/studio/" onClick={(e) => e.preventDefault()} aria-label="Twin Studio">
-            <BotSmiley size={30} variant="brand" trackMouse />
+            <BotSmiley size={30} variant="brand" character="twin" trackMouse />
             <span className="rail-brand-text">
               <strong>Twin Studio</strong>
               <span>Gimel</span>

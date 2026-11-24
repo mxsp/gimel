@@ -649,7 +649,7 @@ function VoiceStage({ user, onLogout }: { user: SessionUser; onLogout: () => voi
     <div className="voice-shell" data-phase={phase}>
       <header className="voice-head">
         <h1 className="voice-brand">
-          <BotSmiley size={31} variant="brand" trackMouse thinking={phase === "thinking"} />
+          <BotSmiley size={31} variant="brand" character="lab" trackMouse thinking={phase === "thinking"} />
           <span>Gimel Voice</span>
         </h1>
         <div className="voice-head-actions">

@@ -64,7 +64,7 @@ export default function Login({ onLogin, title = "Gimel Agent Lab",
     <div className="login-stage">
       <form className="login-card" onSubmit={submit}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <h1 className="login-title" style={{ margin: 0 }}><BotSmiley size={31} variant="brand" trackMouse /> {title}</h1>
+          <h1 className="login-title" style={{ margin: 0 }}><BotSmiley size={31} variant="brand" character="lab" trackMouse /> {title}</h1>
           {localnetOnly && <Tag minimal icon="shield">Localnet</Tag>}
         </div>
         <p className="login-sub">

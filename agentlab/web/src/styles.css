@@ -4922,6 +4922,45 @@ a { color: var(--lab-accent-ink); }
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3),
     0 12px 28px -8px color-mix(in srgb, var(--lab-accent-solid) 48%, transparent);
 }
+.bot-smiley--char-erp {
+  background: var(--bot-custom-bg, linear-gradient(145deg, #10b981, #047857 58%, #064e3b));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 4px 12px -2px rgb(16 185 129 / 0.42);
+}
+.bot-smiley--char-twin {
+  background: var(--bot-custom-bg, linear-gradient(145deg, #38bdf8, #2563eb 56%, #1e3a8a));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 4px 12px -2px rgb(37 99 235 / 0.44);
+}
+.bot-smiley--char-lab {
+  background: var(--bot-custom-bg, linear-gradient(145deg, #c084fc, #7c3aed 56%, #4c1d95));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 4px 12px -2px rgb(124 58 237 / 0.44);
+}
+.bot-lab-orb {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: bot-orb-pulse 2.8s ease-in-out infinite;
+}
+.bot-smiley.is-thinking .bot-lab-orb {
+  animation-duration: 0.9s;
+}
+.bot-erp-lamp {
+  transition: filter 0.2s ease, opacity 0.2s ease;
+}
+.bot-smiley.is-hover .bot-erp-lamp,
+.bot-smiley.is-beam .bot-erp-lamp,
+.bot-smiley.is-wink .bot-erp-lamp {
+  filter: drop-shadow(0 0 2.5px #fde68a);
+}
+.bot-twin-glint {
+  transition: opacity 0.2s ease;
+}
+.bot-smiley.is-hover .bot-twin-glint,
+.bot-smiley.is-thinking .bot-twin-glint {
+  opacity: 0.56;
+}
+@keyframes bot-orb-pulse {
+  0%, 100% { transform: scale(0.95); opacity: 0.9; }
+  50% { transform: scale(1.16); opacity: 1; }
+}
 .bot-smiley-svg { display: block; width: 100%; height: 100%; }
 .bot-smiley.is-interactive {
   cursor: pointer;
@@ -4980,7 +5019,10 @@ a { color: var(--lab-accent-ink); }
   .bot-smiley-face,
   .bot-smiley.is-idle .bot-eye-pill,
   .bot-smiley.is-thinking .bot-smiley-face,
-  .bot-sparkle {
+  .bot-sparkle,
+  .bot-lab-orb,
+  .bot-erp-lamp,
+  .bot-twin-glint {
     animation: none !important;
     transition: none !important;
   }
