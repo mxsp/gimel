@@ -52,7 +52,15 @@ a.gimel-brand:focus-visible { outline: 2px solid var(--gimel-accent-ink); outlin
 :root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined):hover { background-color: var(--gimel-accent-hover); }
 :root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined):active,
 :root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined).bp5-active { background-color: var(--gimel-accent-press); }
-:root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined).bp5-disabled { background-color: rgb(var(--gimel-accent-rgb) / 0.5); color: rgb(var(--g-surface-rgb) / 0.75); }
+:root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined):is(.bp5-disabled, :disabled),
+:root .bp5-button.bp5-intent-primary:not(.bp5-minimal):not(.bp5-outlined):is(.bp5-disabled, :disabled):hover {
+  background-color: var(--g-chrome-head);
+  color: var(--g-muted);
+  border: 1px solid var(--g-rule-soft);
+  box-shadow: none;
+  opacity: 0.72;
+  cursor: not-allowed;
+}
 :root .bp5-button.bp5-minimal.bp5-intent-primary, :root .bp5-button.bp5-outlined.bp5-intent-primary { color: var(--gimel-accent-ink); }
 :root .bp5-button.bp5-minimal.bp5-intent-primary .bp5-icon, :root .bp5-button.bp5-outlined.bp5-intent-primary .bp5-icon { color: inherit; }
 :root .bp5-input:focus, :root .bp5-input.bp5-active { box-shadow: inset 0 0 0 1px var(--gimel-accent), 0 0 0 2px rgb(var(--gimel-accent-rgb) / 0.3), inset 0 1px 1px rgb(var(--g-ink-rgb) / 0.2); }

@@ -19,6 +19,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..config import API_ROOT
@@ -2731,12 +2732,29 @@ def delete_site(site_id: int, db: Annotated[Session, Depends(get_db)],
     _audit(db, admin, "site_delete", "factory_site", site_id, name=s.name)
 
 
+def _check_unique_hall_name(
+    db: Session, site_id: Optional[int], name: str, exclude_id: Optional[int] = None
+) -> str:
+    clean = name.strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="Die Halle braucht einen Namen.")
+    q = db.query(FactoryHall).filter(func.lower(FactoryHall.name) == clean.lower())
+    q = q.filter(FactoryHall.site_id.is_(None)) if site_id is None else q.filter(FactoryHall.site_id == site_id)
+    if exclude_id is not None:
+        q = q.filter(FactoryHall.id != exclude_id)
+    if q.first() is not None:
+        raise HTTPException(status_code=409, detail="Eine Halle mit diesem Namen gibt es an diesem Standort schon.")
+    return clean
+
+
 @router.post("/halls", response_model=HallOut)
 def create_hall(body: HallIn, db: Annotated[Session, Depends(get_db)],
                 admin: Annotated[User, Depends(require_admin)]) -> HallOut:
     if body.site_id is not None and db.get(FactorySite, body.site_id) is None:
         raise HTTPException(status_code=400, detail="Standort nicht gefunden.")
-    h = FactoryHall(**body.model_dump())
+    data = body.model_dump()
+    data["name"] = _check_unique_hall_name(db, body.site_id, body.name)
+    h = FactoryHall(**data)
     db.add(h)
     db.flush()
     # Jede Halle hat mindestens ein Erdgeschoss — sonst gäbe es nichts zu zeichnen.
@@ -2754,7 +2772,9 @@ def update_hall(hall_id: int, body: HallIn, db: Annotated[Session, Depends(get_d
         raise HTTPException(status_code=404, detail="Halle nicht gefunden.")
     if body.site_id is not None and db.get(FactorySite, body.site_id) is None:
         raise HTTPException(status_code=400, detail="Standort nicht gefunden.")
-    changed = {k: v for k, v in body.model_dump().items() if getattr(h, k) != v}
+    data = body.model_dump()
+    data["name"] = _check_unique_hall_name(db, body.site_id, body.name, exclude_id=hall_id)
+    changed = {k: v for k, v in data.items() if getattr(h, k) != v}
     for k, v in changed.items():
         setattr(h, k, v)
     if changed:

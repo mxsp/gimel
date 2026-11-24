@@ -173,7 +173,11 @@ function fmtThk(v: number | undefined): string {
 function withLens(mark: StationMark, lens: Lens, s: Station, schedule: ScheduleById[number] | undefined,
   flow: FlowEdge[], step: TimeStep): StationMark {
   if (lens === "last" || mark.kind === "inaktiv") return mark;
-  const slots = (schedule?.slots ?? []).filter((x) => (x.day ?? 1) > step);
+  const allSlots = schedule?.slots ?? [];
+  const timesUnknown = schedule?.times_known === false;
+  // Bei unbekannter Kapazität/Dauer stehen alle Aufgaben auf Tag 1; ab +1 Tag
+  // behalten wir sie, statt fälschlich „keine Termine“ zu melden.
+  const slots = timesUnknown ? allSlots : allSlots.filter((x) => (x.day ?? 1) > step);
   if (lens === "ruesten") {
     const changes = slots.filter((x) => x.changeover).length;
     const change = changes ? { line: ` · ≈${changes} Wechsel`, spoken: `, geschätzt ${plural(changes, "Wechsel", "Wechsel")}` } : { line: "", spoken: "" };
@@ -182,8 +186,14 @@ function withLens(mark: StationMark, lens: Lens, s: Station, schedule: ScheduleB
     return { ...mark, line: `zuletzt ${mat}${change.line}`, lineSpoken: `zuletzt eingeplant ${mat}${change.spoken}` };
   }
   if (lens === "termine") {
-    if (!slots.length) return { ...mark, line: "keine Termine", lineSpoken: "keine Termine" };
-    const late = slots.filter((x) => x.late).length;
+    if (timesUnknown && allSlots.length) return { ...mark, line: "Terminlage ?", lineSpoken: "Terminlage unbekannt" };
+    const earlierLate = allSlots.filter((x) => (x.day ?? 1) <= step && x.late).length;
+    if (!slots.length) {
+      return earlierLate
+        ? { ...mark, line: `≈${earlierLate} bereits spät`, lineSpoken: `geschätzt ${earlierLate} bereits spät` }
+        : { ...mark, line: "keine Termine", lineSpoken: "keine Termine" };
+    }
+    const late = slots.filter((x) => x.late).length + earlierLate;
     return late
       ? { ...mark, line: `≈${late} spät`, lineSpoken: `geschätzt ${late} spät` }
       : { ...mark, line: "≈im Termin", lineSpoken: "geschätzt im Termin" };

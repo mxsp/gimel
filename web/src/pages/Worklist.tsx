@@ -255,6 +255,7 @@ export default function Worklist() {
   if (error && !data) return <div className="twin-center twin-error">{error}</div>;
   if (!data) return null;
 
+  const hasUserFilter = Boolean(search.trim() || areaFilter !== "all" || focusedStation != null || kind);
   const allCollapsed = visibleStations.length > 0 && visibleStations.every((s) => collapsed.has(s.id));
 
   return (
@@ -480,13 +481,19 @@ export default function Worklist() {
       })}
 
       {!visibleStations.length && (
-        <NonIdealState icon="layout" title={stations.length ? "Keine Station passt zum Filter" : "Keine Station dieses Typs"}
-          description={stations.length
-            ? "Filter zurücksetzen, um alle Stationen wieder anzuzeigen."
-            : "Stationen werden im Grundriss angelegt — dort bekommt jede ihren Typ, ihre Werkstoffe und ihre Zeiten."}
-          action={stations.length
-            ? <Button icon="reset" text="Filter zurücksetzen" onClick={() => { setSearch(""); setOnlyBusy(false); setAreaFilter("all"); setFocusedStation(null); }} />
-            : <Button icon="edit" text="Grundriss bearbeiten" onClick={() => navigate("grundriss/admin")} />} />
+        !stations.length ? (
+          <NonIdealState icon="layout" title="Keine Station dieses Typs"
+            description="Stationen werden im Grundriss angelegt — dort bekommt jede ihren Typ, ihre Werkstoffe und ihre Zeiten."
+            action={<Button icon="edit" text="Grundriss bearbeiten" onClick={() => navigate("grundriss/admin")} />} />
+        ) : !hasUserFilter && onlyBusy && busyStations.length === 0 ? (
+          <NonIdealState icon="tick-circle" title="Alle Stationen sind derzeit frei"
+            description={`${plural(idleStations.length, "leere Station ist", "leere Stationen sind")} ausgeblendet.`}
+            action={<Button icon="eye-open" text={`Leere zeigen (${idleStations.length})`} onClick={() => setOnlyBusy(false)} />} />
+        ) : (
+          <NonIdealState icon="layout" title="Keine Station passt zum Filter"
+            description="Filter zurücksetzen, um alle Stationen wieder anzuzeigen."
+            action={<Button icon="reset" text="Filter zurücksetzen" onClick={() => { setSearch(""); setOnlyBusy(false); setAreaFilter("all"); setFocusedStation(null); setKind(""); }} />} />
+        )
       )}
 
       {/* ---------------- Der freie Vorrat ---------------- */}

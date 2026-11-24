@@ -8,6 +8,7 @@ Ein Subagent erzeugt nie einen neuen Chat und darf nie weitere Subagenten starte
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from datetime import datetime, timezone
@@ -149,7 +150,8 @@ def _run_async(subagent_id: int) -> None:
                     db.commit()
                     messages.append({
                         "role": "tool", "tool_call_id": str(call.get("id") or ""),
-                        "name": name, "content": str(result)[:12_000],
+                        "name": name,
+                        "content": json.dumps(result, ensure_ascii=False, default=str)[:12_000],
                     })
             else:
                 hit_limit = True
@@ -172,14 +174,21 @@ def _run_async(subagent_id: int) -> None:
                     text = synth_text
             return text[:MAX_RESULT_CHARS]
 
-        sub.result = asyncio.run(go()) or "(keine Antwort)"
-        sub.status = "done"
-        sub.last_used_at = datetime.now(timezone.utc)
+        result_text = asyncio.run(go()) or "(keine Antwort)"
+        db.expire_all()
+        fresh = db.get(AgentSubagent, subagent_id)
+        if fresh is None or fresh.disposed_at is not None:
+            return
+        fresh.result = result_text
+        fresh.status = "done"
+        fresh.last_used_at = datetime.now(timezone.utc)
         db.commit()
     except Exception as exc:  # noqa: BLE001
         try:
+            db.rollback()
+            db.expire_all()
             sub = db.get(AgentSubagent, subagent_id)
-            if sub is not None:
+            if sub is not None and sub.disposed_at is None:
                 sub.status = "error"
                 sub.result = str(exc)[:MAX_RESULT_CHARS]
                 db.commit()
@@ -194,8 +203,8 @@ def start_subagent(subagent_id: int) -> None:
                      name=f"subagent-{subagent_id}").start()
 
 
-def wait_for_subagents(chat_id: int, timeout_s: float = 120.0) -> list[AgentSubagent]:
-    """Wartet, bis alle Subagenten eines Chats fertig sind (für das Werkzeug)."""
+def wait_for_subagents(chat_id: int, timeout_s: float = 120.0) -> tuple[list[AgentSubagent], bool]:
+    """Wartet, bis alle Subagenten eines Chats fertig sind; gibt ``(rows, timed_out)`` zurück."""
     deadline = time.monotonic() + max(1.0, min(timeout_s, 300.0))
     from gimel.db import SessionLocal as _SL
     while True:
@@ -208,12 +217,19 @@ def wait_for_subagents(chat_id: int, timeout_s: float = 120.0) -> list[AgentSuba
                 .all()
             )
             if not rows:
-                return (
+                all_rows = (
                     db.query(AgentSubagent)
                     .filter(AgentSubagent.chat_id == chat_id)
                     .order_by(AgentSubagent.id)
                     .all()
                 )
-        if time.monotonic() >= deadline:
-            return []
+                return all_rows, False
+            if time.monotonic() >= deadline:
+                all_rows = (
+                    db.query(AgentSubagent)
+                    .filter(AgentSubagent.chat_id == chat_id)
+                    .order_by(AgentSubagent.id)
+                    .all()
+                )
+                return all_rows, True
         time.sleep(0.3)

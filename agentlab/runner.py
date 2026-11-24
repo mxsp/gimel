@@ -431,17 +431,26 @@ async def run_stream(
         )
         active_agent = agent_service.resolve_chat_agent(db, chat)
         preferred_cats = set(active_agent.get("tool_categories") or ()) if active_agent else None
+        _is_orch = (getattr(chat, "kind", "classic") or "classic").lower() == "orchestrator"
+        history_msgs = _history(db, chat)
+        recent_tools: set[str] = set()
+        for msg in history_msgs[-14:]:
+            for call in msg.get("tool_calls") or ():
+                fn_name = str((call.get("function") or {}).get("name") or "").strip()
+                if fn_name:
+                    recent_tools.add(fn_name)
         tools = schemas_for(
             user, chat.write_mode, web_enabled=web_enabled,
             sandbox_enabled=sandbox_enabled, hands_free=hands_free,
             route=route, max_tools=tool_cap, query=prompt,
+            recent_tools=recent_tools,
             preferred_categories=preferred_cats,
+            is_orchestrator=_is_orch,
         )
         messages = [{
             "role": "system",
             "content": _system_prompt(db, user, chat, route, context, hands_free, active_agent=active_agent),
         }]
-        _is_orch = (getattr(chat, "kind", "classic") or "classic").lower() == "orchestrator"
         if _is_orch:
             compact_budget = min(200_000, max(compact_budget, 180_000))
             have_names = {t.get("function", {}).get("name") for t in tools}
@@ -461,7 +470,7 @@ async def run_stream(
                         },
                     })
                     have_names.add(must_name)
-        messages.extend(_history(db, chat))
+        messages.extend(history_msgs)
         configured_steps = agent_settings.get_int(db, "agent_max_steps")
         if _is_orch:
             orch_steps = agent_settings.get_int(db, "agent_orchestrator_max_steps")

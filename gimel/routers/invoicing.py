@@ -1643,9 +1643,10 @@ def invoice_links(no: str, db: Annotated[Session, Depends(get_db)]) -> InvoiceLi
 
     row = local_invoices.current(db, order)
     if row:
+        buyer = (row.data or {}).get("buyer") or {}
         return InvoiceLinks(order_no=order.no, invoice_no=row.number, number=row.number,
                             status="bezahlt" if order.paid else "offen", total_cents=row.gross_cents,
-                            recipient=row.data["buyer"].get("email", ""), verwendungszweck=row.number)
+                            recipient=buyer.get("email", ""), verwendungszweck=row.number)
     live = not stripe_client.secret_key().startswith("sk_test")
     # Die Dashboard-Adresse folgt einem festen Muster und braucht keinen Aufruf.
     dash = (
@@ -1795,15 +1796,15 @@ def void_invoice(
         raise HTTPException(
             status_code=404, detail="Zu diesem Auftrag gibt es keine Rechnung."
         )
-    row = local_invoices.current(db, order)
-    if row:
-        return _cancel_local(order, row, "Storno aus dem Auftragsbüro", db, actor)
     if order.paid:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Eine bezahlte Rechnung wird nicht storniert, "
             "sondern gutgeschrieben.",
         )
+    row = local_invoices.current(db, order)
+    if row:
+        return _cancel_local(order, row, "Storno aus dem Auftragsbüro", db, actor)
     old = order.invoice_no
     try:
         stripe = _try_client()
@@ -1948,9 +1949,28 @@ async def stripe_webhook(
     if etype == "invoice.paid":
         order = db.query(Order).filter(Order.invoice_no == obj.get("id")).first()
         if order:
-            _book_payment(
-                db, order, int(obj.get("amount_paid") or 0), obj.get("id") or "", obj.get("currency") or ""
-            )
+            try:
+                _book_payment(
+                    db, order, int(obj.get("amount_paid") or 0), obj.get("id") or "", obj.get("currency") or ""
+                )
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_409_CONFLICT:
+                    raise
+                db.add(
+                    AuditLog(
+                        actor="stripe",
+                        action="invoice_paid_mismatch",
+                        entity="order",
+                        entity_id=order.no,
+                        detail={
+                            "invoice_id": obj.get("id") or "",
+                            "amount_paid": obj.get("amount_paid"),
+                            "currency": obj.get("currency") or "",
+                            "expected_gross_cents": _cents(order.gross),
+                            "detail": exc.detail,
+                        },
+                    )
+                )
             db.commit()
         else:
             # Eine Rechnung, die keinem Auftrag hier gehört — protokollieren,

@@ -12,6 +12,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -245,12 +246,19 @@ def register(
         active=True,
         email_verified=False,
     )
-    db.add(user)
-    db.flush()
-    db.add(
-        AuditLog(actor=email, action="register", entity="user", entity_id=str(user.id))
-    )
-    db.commit()
+    try:
+        db.add(user)
+        db.flush()
+        db.add(
+            AuditLog(actor=email, action="register", entity="user", entity_id=str(user.id))
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Diese E-Mail ist bereits registriert.",
+        ) from exc
     raw, sid = _create_session(db, user, request)
     _set_refresh_cookie(response, raw, request=request)
     db.refresh(user)

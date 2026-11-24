@@ -324,7 +324,7 @@ INDEXES: list[tuple[str, str, str]] = [
     ("ix_station_tasks_kind_state_done", "station_tasks", "kind, state, done_at DESC"),
     ("ix_station_tasks_ref", "station_tasks", "kind, ref"),
     # Rechnungen
-    ("ix_local_invoices_kind_issued", "local_invoices", "kind, issued_at DESC"),
+    ("ix_local_invoices_kind_issued", "local_invoices", "kind, issue_date DESC"),
 ]
 
 

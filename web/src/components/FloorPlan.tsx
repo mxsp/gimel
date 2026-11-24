@@ -472,7 +472,14 @@ export default function FloorPlan({
     if (!d) return;
     const [mx, my] = toMeter(e.clientX, e.clientY);
     if (d.kind === "draft") {
-      const p: [number, number] = [snap(mx), snap(my)];
+      let x = snap(mx);
+      let y = snap(my);
+      if (e.shiftKey && draft && draft.length >= 2) {
+        const prev = draft[(d.idx - 1 + draft.length) % draft.length];
+        if (Math.abs(x - prev[0]) >= Math.abs(y - prev[1])) y = prev[1];
+        else x = prev[0];
+      }
+      const p: [number, number] = [x, y];
       onDraftMove?.(d.idx, p);
       setTip({ x: p[0], y: p[1] - 0.45, text: `${fmtNum(p[0])} · ${fmtNum(p[1])} m` });
       return;
@@ -789,7 +796,7 @@ export default function FloorPlan({
     // Magnet: nah am Startpunkt → Polygon schließen und im Bearbeitungsmodus bleiben!
     if (draft && draft.length >= 3) {
       const p0 = draft[0];
-      if (Math.hypot(mx - p0[0], my - p0[1]) < 15 * metersPerPx()) {
+      if (Math.hypot(mx - p0[0], my - p0[1]) < 14 * metersPerPx()) {
         if (onDraftCloseLoop) onDraftCloseLoop(); else onDraftFinish?.();
         return;
       }

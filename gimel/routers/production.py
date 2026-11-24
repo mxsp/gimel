@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..db import get_db
+from ..db import chunked_in, get_db
 from ..core.batch import MODE_BATCH, MODES
 from ..core.cutting import MODE_AUTO, MODE_CLASSIC, STRATEGY_LABELS, CutPlan
 from ..models import (
@@ -888,6 +888,11 @@ def set_plate_status(
     Häkchen sind der Zwischenstand, der zeigt, welche Platte dran ist.
     """
     wo = _load_wo(db, no)
+    if wo.status == WorkOrderStatus.cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail="Stornierter Innenauftrag kann nicht geändert werden.",
+        )
     plate = next((p for p in wo.plates if p.idx == idx), None)
     if not plate:
         raise HTTPException(
@@ -1668,6 +1673,11 @@ def set_status(
     Punkt, an dem der Kundenauftrag in der Fertigung wirklich weiter ist.
     """
     wo = _load_wo(db, no)
+    if wo.status == WorkOrderStatus.cancelled and body.status != WorkOrderStatus.cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail="Stornierter Innenauftrag kann nicht wieder geöffnet werden.",
+        )
     now = datetime.now(timezone.utc)
     if body.status == WorkOrderStatus.cancelled:
         from ..services.work_orders import cancel_work_order
@@ -1700,20 +1710,14 @@ def set_status(
         for p in wo.plates:
             p.status = WorkOrderStatus.done
         # Alle enthaltenen Kundenaufträge als fertig markieren
-        item_orders = {
-            i.order_no
-            for i in db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
-        }
+        items = db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
+        item_orders = {i.order_no for i in items}
         wo.order_done = {ono: now.isoformat() for ono in item_orders}
-        ids = [
-            i.position_id
-            for i in db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
-            if i.position_id
-        ]
+        ids = [i.position_id for i in items if i.position_id]
         if ids:
             (
                 db.query(OrderPosition)
-                .filter(OrderPosition.id.in_(ids))
+                .filter(chunked_in(OrderPosition.id, ids))
                 .update(
                     {OrderPosition.production_status: "done"}, synchronize_session=False
                 )
@@ -1858,6 +1862,11 @@ def toggle_order_done(
     Auftragsverfolgung und im Portal sichtbar wird.
     """
     wo = _load_wo(db, no)
+    if wo.status == WorkOrderStatus.cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail="Stornierter Innenauftrag kann nicht geändert werden.",
+        )
 
     # Prüfen, dass dieser Auftrag überhaupt in diesem Innenauftrag vorkommt
     item_orders = {
@@ -1948,6 +1957,16 @@ def set_plate_status_and_finish(
     Fertigung wirklich weiter ist.
     """
     wo = _load_wo(db, no)
+    if wo.status == WorkOrderStatus.cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail="Stornierter Innenauftrag kann nicht geändert werden.",
+        )
+    if body.status == WorkOrderStatus.cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail="Eine einzelne Platte kann nicht storniert werden.",
+        )
     plate = None
     for p in wo.plates:
         if p.idx == idx:
@@ -1968,11 +1987,25 @@ def set_plate_status_and_finish(
         wo.done_by = actor.email
         wo_updated = True
         # Alle enthaltenen Kundenaufträge als fertig markieren
-        item_orders = {
-            i.order_no
-            for i in db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
-        }
+        items = db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
+        item_orders = {i.order_no for i in items}
         wo.order_done = {ono: now.isoformat() for ono in item_orders}
+        ids = [i.position_id for i in items if i.position_id]
+        if ids:
+            (
+                db.query(OrderPosition)
+                .filter(chunked_in(OrderPosition.id, ids))
+                .update(
+                    {OrderPosition.production_status: "done"}, synchronize_session=False
+                )
+            )
+    elif not all_done and wo.status == WorkOrderStatus.done:
+        # Platte wieder geöffnet → IA wieder open und Positionen zurück auf batched
+        wo.status = WorkOrderStatus.open
+        wo.done_at = None
+        wo.done_by = ""
+        wo.order_done = {}
+        wo_updated = True
         ids = [
             i.position_id
             for i in db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
@@ -1981,18 +2014,13 @@ def set_plate_status_and_finish(
         if ids:
             (
                 db.query(OrderPosition)
-                .filter(OrderPosition.id.in_(ids))
+                .filter(chunked_in(OrderPosition.id, ids))
+                .filter(OrderPosition.production_status == "done")
                 .update(
-                    {OrderPosition.production_status: "done"}, synchronize_session=False
+                    {OrderPosition.production_status: "batched"},
+                    synchronize_session=False,
                 )
             )
-    elif not all_done and wo.status == WorkOrderStatus.done:
-        # Platte wieder geöffnet → IA wieder open
-        wo.status = WorkOrderStatus.open
-        wo.done_at = None
-        wo.done_by = ""
-        wo.order_done = {}
-        wo_updated = True
 
     db.add(
         AuditLog(

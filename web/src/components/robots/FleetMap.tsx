@@ -43,6 +43,10 @@ export default function FleetMap({ floor, stations, robots, sampledAt, selectedI
   }, [floor, robots, stations]);
   const { view, setView, panHandlers } = useMapView(svgRef, home, floor?.id ?? -1);
   const [now, setNow] = useState(() => Date.now());
+  const receivedRef = useRef<{ at: string | null | undefined; ms: number }>({ at: undefined, ms: Date.now() });
+  if (receivedRef.current.at !== sampledAt) {
+    receivedRef.current = { at: sampledAt, ms: Date.now() };
+  }
 
   // Lebende Lage: zehnmal je Sekunde neu rechnen, nur wenn die Seite sichtbar ist.
   useEffect(() => {
@@ -57,7 +61,7 @@ export default function FleetMap({ floor, stations, robots, sampledAt, selectedI
 
   const focusSelected = () => {
     const r = robots.find((x) => x.id === selectedId);
-    const pose = r ? robotPoseAt(r, sampledAt, Date.now()) : null;
+    const pose = r ? robotPoseAt(r, sampledAt, Date.now(), receivedRef.current.ms) : null;
     const route = r?.route ?? [];
     if (!r || (!pose && route.length < 2)) { setView(home); return; }
     const xs = [...route.map((p) => p[0]), ...(pose ? [pose.x] : [])];
@@ -105,9 +109,9 @@ export default function FleetMap({ floor, stations, robots, sampledAt, selectedI
         )}
 
         {order.map((r) => {
-          const pose = robotPoseAt(r, sampledAt, now);
+          const pose = robotPoseAt(r, sampledAt, now, receivedRef.current.ms);
           if (!pose) return null;
-          const moving = r.active && robotMovingAt(r, sampledAt, now);
+          const moving = r.active && robotMovingAt(r, sampledAt, now, receivedRef.current.ms);
           const sel = r.id === selectedId;
           const L = unit * (r.kind === "amr" ? 0.95 : 1.25), W = unit * (r.kind === "amr" ? 0.72 : 0.86);
           const colour = stateColour(moving ? "moving" : r.state === "moving" ? "idle" : r.state, r.active);

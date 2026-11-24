@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
@@ -21,6 +22,7 @@ from ..models import (
     AuditLog,
     LibraryShape,
     NestRun,
+    Offcut,
     Order,
     OrderPosition,
     PortalSync,
@@ -38,10 +40,13 @@ from ..models import (
 )
 from ..schemas import AuditOut
 from ..security import require_admin, require_staff, require_worker
-from ..services import floor_view, identity, settings_store
+from ..services import floor_view, identity, order_flow, settings_store
 from ..services.events import bus
+from ..services.inventory import move_stock
 from ..services.orders import search_filter
+from ..services.work_orders import cancel_work_order
 
+log = logging.getLogger("gimel.admin")
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
@@ -512,16 +517,19 @@ def stats(db: Annotated[Session, Depends(get_db)]) -> dict:
         .filter(WorkOrder.status.in_((WorkOrderStatus.open, WorkOrderStatus.running)))
         .one()
     )
-    unverified_price = (
-        db.query(func.count(Product.id))
-        .filter(Product.active.is_(True))
-        .filter(
-            func.json_extract(Product.verified, "$.price").is_(None)
-            if db.bind.dialect.name == "sqlite"
-            else True
+    if db.bind is not None and db.bind.dialect.name == "sqlite":
+        unverified_price = (
+            db.query(func.count(Product.id))
+            .filter(Product.active.is_(True))
+            .filter(func.json_extract(Product.verified, "$.price").is_(None))
+            .scalar()
         )
-        .scalar()
-    )
+    else:
+        unverified_price = sum(
+            1
+            for (v,) in db.query(Product.verified).filter(Product.active.is_(True)).all()
+            if (v or {}).get("price") is None
+        )
     return {
         "users": int(user_total or 0),
         "users_active": int(user_active or 0),
@@ -1781,17 +1789,45 @@ def _rollback_one(db: Session, order: Order, actor: User, step_id: str) -> dict:
                 )
             )
         else:
-            db.add(
-                AuditLog(
-                    actor=actor.email,
-                    action="shipment_delete",
-                    entity="shipment",
-                    entity_id=victim.no,
-                    detail={"rollback_from": order.no},
+            other_ship_item = (
+                db.query(ShipmentItem.id)
+                .filter(
+                    ShipmentItem.shipment_id == victim.id,
+                    ShipmentItem.order_id != order.id,
                 )
+                .first()
             )
-            db.delete(victim)
-            detail = {"step": "shipped", "deleted_shipment": victim.no}
+            db.query(ShipmentItem).filter(
+                ShipmentItem.shipment_id == victim.id,
+                ShipmentItem.order_id == order.id,
+            ).delete(synchronize_session=False)
+            if other_ship_item is None:
+                db.add(
+                    AuditLog(
+                        actor=actor.email,
+                        action="shipment_delete",
+                        entity="shipment",
+                        entity_id=victim.no,
+                        detail={"rollback_from": order.no},
+                    )
+                )
+                db.delete(victim)
+                detail = {"step": "shipped", "deleted_shipment": victim.no}
+            else:
+                detail = {
+                    "step": "shipped",
+                    "shipment": victim.no,
+                    "removed_items_for": order.no,
+                }
+                db.add(
+                    AuditLog(
+                        actor=actor.email,
+                        action="order_rollback",
+                        entity="order",
+                        entity_id=order.no,
+                        detail=detail,
+                    )
+                )
         return detail
     if step_id == "done":
         pids = [p.id for p in order.positions if p.production_status == "done"]
@@ -1799,7 +1835,7 @@ def _rollback_one(db: Session, order: Order, actor: User, step_id: str) -> dict:
             raise HTTPException(
                 status_code=422, detail="Keine geschnittenen Positionen."
             )
-        done_wis = db.query(WorkItem).filter(WorkItem.position_id.in_(pids)).all()
+        done_wis = db.query(WorkItem).filter(chunked_in(WorkItem.position_id, pids)).all()
         wo_nos = {wi.work_order_id for wi in done_wis}
         for wi in done_wis:
             pos = db.get(OrderPosition, wi.position_id)
@@ -1828,7 +1864,7 @@ def _rollback_one(db: Session, order: Order, actor: User, step_id: str) -> dict:
     if step_id == "cutting":
         pids = [p.id for p in order.positions]
         wis = (
-            db.query(WorkItem).filter(WorkItem.position_id.in_(pids)).all()
+            db.query(WorkItem).filter(chunked_in(WorkItem.position_id, pids)).all()
             if pids
             else []
         )
@@ -1870,34 +1906,113 @@ def _rollback_one(db: Session, order: Order, actor: User, step_id: str) -> dict:
             raise HTTPException(
                 status_code=422, detail="Keine eingeplanten Positionen."
             )
-        wis = db.query(WorkItem).filter(WorkItem.position_id.in_(pids)).all()
-        plate_ids = {wi.plate_id for wi in wis}
-        touched_wo_ids = {wi.work_order_id for wi in wis}
-        for wi in wis:
-            db.delete(wi)
-        for pid in pids:
-            pos = db.get(OrderPosition, pid)
-            if pos:
-                pos.production_status = "pending"
-        for pl_id in plate_ids:
-            pl = db.get(WorkPlate, pl_id)
-            if pl:
+        wis = db.query(WorkItem).filter(chunked_in(WorkItem.position_id, pids)).all()
+        touched_wo_ids = sorted({wi.work_order_id for wi in wis})
+        pid_set = set(pids)
+        emptied_wo_ids: set[int] = set()
+        for wo_id in touched_wo_ids:
+            wo = db.get(WorkOrder, wo_id)
+            if wo is None:
+                continue
+            other = (
+                db.query(WorkItem.id)
+                .filter(
+                    WorkItem.work_order_id == wo_id,
+                    ~chunked_in(WorkItem.position_id, pids),
+                )
+                .first()
+            )
+            if other is None:
+                cancel_work_order(
+                    db,
+                    wo,
+                    actor=actor.email,
+                    reason=f"Rollback Auftrag {order.no}",
+                    commit=False,
+                )
+                emptied_wo_ids.add(wo_id)
+
+        partial_wis = [wi for wi in wis if wi.work_order_id not in emptied_wo_ids]
+        if partial_wis:
+            plate_ids = {wi.plate_id for wi in partial_wis}
+            partial_wo_ids = {wi.work_order_id for wi in partial_wis}
+            db.query(WorkItem).filter(
+                chunked_in(WorkItem.id, [wi.id for wi in partial_wis])
+            ).delete(synchronize_session=False)
+            (
+                db.query(OrderPosition)
+                .filter(chunked_in(OrderPosition.id, pids))
+                .filter(OrderPosition.production_status != "done")
+                .update(
+                    {OrderPosition.production_status: "pending"},
+                    synchronize_session=False,
+                )
+            )
+            for pl_id in plate_ids:
+                pl = db.get(WorkPlate, pl_id)
+                if not pl:
+                    continue
                 remaining = (
                     db.query(WorkItem).filter(WorkItem.plate_id == pl_id).count()
                 )
                 if remaining == 0:
+                    wo = db.get(WorkOrder, pl.work_order_id)
+                    if pl.offcut_id and wo is not None:
+                        off = db.get(Offcut, pl.offcut_id)
+                        if off is not None and off.status == "reserved" and off.work_order_no == wo.no:
+                            off.status = "available"
+                            off.work_order_no = ""
+                    elif wo is not None:
+                        product = db.get(Product, wo.mat)
+                        if product is not None:
+                            move_stock(
+                                db,
+                                product,
+                                1,
+                                reason="storno",
+                                actor=actor.email,
+                                work_order_no=wo.no,
+                                note=f"{wo.no} Platte {pl.idx + 1} bei Rollback {order.no} freigegeben",
+                            )
+                    if wo is not None:
+                        (
+                            db.query(Offcut)
+                            .filter(
+                                Offcut.source_work_order_no == wo.no,
+                                Offcut.source_plate_id == pl.id,
+                                Offcut.status == "pending",
+                            )
+                            .delete(synchronize_session=False)
+                        )
+                    db.expire(pl, ["items"])
                     db.delete(pl)
                 else:
                     pl.placements = [
                         x
                         for x in (pl.placements or [])
-                        if x.get("position_id") not in pids
+                        if x.get("position_id") not in pid_set
                     ]
                     pl.n_parts = remaining
-        for wo_id in touched_wo_ids:
-            wo = db.get(WorkOrder, wo_id)
-            if wo and db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).count() == 0:
-                db.delete(wo)
+            db.flush()
+            for wo_id in partial_wo_ids:
+                wo = db.get(WorkOrder, wo_id)
+                if wo is None:
+                    continue
+                rem_plates = db.query(WorkPlate).filter(WorkPlate.work_order_id == wo.id).all()
+                rem_items = db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
+                wo.n_plates = len(rem_plates)
+                wo.n_parts = len(rem_items)
+                wo.n_orders = len({i.order_no for i in rem_items})
+        else:
+            (
+                db.query(OrderPosition)
+                .filter(chunked_in(OrderPosition.id, pids))
+                .filter(OrderPosition.production_status == "batched")
+                .update(
+                    {OrderPosition.production_status: "pending"},
+                    synchronize_session=False,
+                )
+            )
         db.add(
             AuditLog(
                 actor=actor.email,
@@ -1936,12 +2051,19 @@ def order_rollback(
     order = db.query(Order).filter(Order.no == no).first()
     if not order:
         raise HTTPException(status_code=404, detail="Auftrag nicht gefunden.")
+    if order.cancelled_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stornierter Auftrag kann nicht zurückgerollt werden.",
+        )
     steps = _build_timeline(db, order)
     done_ids = [s["id"] for s in steps if s["done"]]
-    if not done_ids:
+    rollbackable_ids = [s["id"] for s in steps if s.get("can_rollback")]
+    rollbackable = set(rollbackable_ids)
+    if not done_ids or not rollbackable_ids:
         raise HTTPException(status_code=422, detail="Nichts zurückzurollen.")
     order_ids = [s["id"] for s in steps]
-    target = (body.step or done_ids[-1]).strip()
+    target = (body.step or rollbackable_ids[-1]).strip()
     if target == "paid":
         raise HTTPException(
             status_code=422,
@@ -1952,18 +2074,34 @@ def order_rollback(
             status_code=422,
             detail=f"Schritt „{target}“ ist nicht erledigt — nur erledigte Schritte können zurückgerollt werden.",
         )
+    if target not in rollbackable:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Schritt „{target}“ kann nicht zurückgerollt werden.",
+        )
     target_idx = order_ids.index(target)
-    last_idx = order_ids.index(done_ids[-1])
+    last_idx = order_ids.index(rollbackable_ids[-1])
     if target_idx > last_idx:
         raise HTTPException(status_code=422, detail="Ziel liegt in der Zukunft.")
     chain = [
         order_ids[i]
         for i in range(last_idx, target_idx - 1, -1)
-        if order_ids[i] in done_ids and order_ids[i] != "paid"
+        if order_ids[i] in rollbackable
     ]
     if not chain:
         raise HTTPException(
             status_code=422, detail="Kein Produktionsschritt zum Zurückrollen."
+        )
+    try:
+        order_flow._claim(db, order, None)
+    except order_flow.FlowError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    if order.cancelled_at is not None:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stornierter Auftrag kann nicht zurückgerollt werden.",
         )
     rolled: list[dict] = []
     for sid in chain:
@@ -1972,10 +2110,16 @@ def order_rollback(
             rolled.append(d)
             db.flush()
         except HTTPException:
+            db.rollback()
             raise
-        except Exception as e:
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception:
+            db.rollback()
+            log.exception("Rollback bei %s (%s) fehlgeschlagen", order.no, sid)
             raise HTTPException(
-                status_code=500, detail=f"Rollback bei {sid} fehlgeschlagen: {e}"
+                status_code=500, detail=f"Rollback bei {sid} fehlgeschlagen."
             )
     if body.reason:
         db.add(
@@ -2008,11 +2152,16 @@ def order_rollback_legacy(
     order = db.query(Order).filter(Order.no == no).first()
     if not order:
         raise HTTPException(status_code=404, detail="Auftrag nicht gefunden.")
+    if order.cancelled_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stornierter Auftrag kann nicht zurückgerollt werden.",
+        )
     steps = _build_timeline(db, order)
-    done_ids = [s["id"] for s in steps if s["done"]]
-    if not done_ids:
+    rollbackable_ids = [s["id"] for s in steps if s.get("can_rollback")]
+    if not rollbackable_ids:
         raise HTTPException(status_code=422, detail="Nichts zurückzurollen.")
-    last = done_ids[-1]
+    last = rollbackable_ids[-1]
     target = (body.step or last).strip()
     if target != last:
         raise HTTPException(
@@ -2020,179 +2169,32 @@ def order_rollback_legacy(
             detail=f"Nur der letzte Schritt kann zurückgerollt werden — erwartet „{last}“, erhalten „{target}“.",
         )
 
-    detail: dict = {"from": last}
-    if last == "paid":
-        order.paid = False
-        order.paid_at = None
-        detail["paid"] = False
-        db.add(
-            AuditLog(
-                actor=actor.email,
-                action="order_rollback",
-                entity="order",
-                entity_id=order.no,
-                detail={"step": "paid", "to": "unpaid"},
-            )
-        )
-    elif last == "shipped":
-        ship_rows = (
-            db.query(Shipment)
-            .join(ShipmentItem, ShipmentItem.shipment_id == Shipment.id)
-            .filter(ShipmentItem.order_id == order.id)
-            .all()
-        )
-        packing = [s for s in ship_rows if s.status.value == "packing"]
-        target_ships = packing if packing else ship_rows
-        if not target_ships:
-            raise HTTPException(
-                status_code=422, detail="Kein Versand zum Zurückrollen."
-            )
-        victim = sorted(target_ships, key=lambda s: s.created_at, reverse=True)[0]
-        if victim.status.value != "packing":
-            victim.status = ShipmentStatus.packing
-            victim.shipped_at = None
-            victim.shipped_by = ""
-            db.add(
-                AuditLog(
-                    actor=actor.email,
-                    action="order_rollback",
-                    entity="order",
-                    entity_id=order.no,
-                    detail={"step": "shipped", "shipment": victim.no, "to": "packing"},
-                )
-            )
-            detail["shipment"] = victim.no
-        else:
-            db.add(
-                AuditLog(
-                    actor=actor.email,
-                    action="shipment_delete",
-                    entity="shipment",
-                    entity_id=victim.no,
-                    detail={"rollback_from": order.no},
-                )
-            )
-            db.delete(victim)
-            detail["deleted_shipment"] = victim.no
-    elif last == "done":
-        pids = [p.id for p in order.positions if p.production_status == "done"]
-        if not pids:
-            raise HTTPException(
-                status_code=422, detail="Keine geschnittenen Positionen."
-            )
-        done_wis = db.query(WorkItem).filter(WorkItem.position_id.in_(pids)).all()
-        wo_nos = {wi.work_order_id for wi in done_wis}
-        for wi in done_wis:
-            pos = db.get(OrderPosition, wi.position_id)
-            if pos:
-                pos.production_status = "batched"
-        for wo_id in wo_nos:
-            wo = db.get(WorkOrder, wo_id)
-            if wo:
-                if wo.status.value == "done":
-                    wo.status = WorkOrderStatus.open
-                    wo.done_at = None
-                    wo.done_by = ""
-                wo.order_done = {
-                    k: v for k, v in (wo.order_done or {}).items() if k != order.no
-                }
-        db.add(
-            AuditLog(
-                actor=actor.email,
-                action="order_rollback",
-                entity="order",
-                entity_id=order.no,
-                detail={"step": "done", "positions": len(pids)},
-            )
-        )
-        detail["positions"] = len(pids)
-    elif last == "cutting":
-        pids = [p.id for p in order.positions]
-        wis = (
-            db.query(WorkItem).filter(WorkItem.position_id.in_(pids)).all()
-            if pids
-            else []
-        )
-        for wo_id in {wi.work_order_id for wi in wis}:
-            wo = db.get(WorkOrder, wo_id)
-            if wo and wo.status == WorkOrderStatus.running:
-                wo.status = WorkOrderStatus.open
-                wo.started_at = None
-                wo.started_by = ""
-        db.add(
-            AuditLog(
-                actor=actor.email,
-                action="order_rollback",
-                entity="order",
-                entity_id=order.no,
-                detail={"step": "cutting", "to": "open"},
-            )
-        )
-    elif last == "planned":
-        pids = [p.id for p in order.positions if p.production_status == "batched"]
-        if not pids:
-            raise HTTPException(
-                status_code=422, detail="Keine eingeplanten Positionen."
-            )
-        wis = db.query(WorkItem).filter(WorkItem.position_id.in_(pids)).all()
-        plate_ids = {wi.plate_id for wi in wis}
-        for wi in wis:
-            db.delete(wi)
-        for pid in pids:
-            pos = db.get(OrderPosition, pid)
-            if pos:
-                pos.production_status = "pending"
-        for pl_id in plate_ids:
-            pl = db.get(WorkPlate, pl_id)
-            if pl:
-                remaining = (
-                    db.query(WorkItem).filter(WorkItem.plate_id == pl_id).count()
-                )
-                if remaining == 0:
-                    db.delete(pl)
-                else:
-                    pl.placements = [
-                        x
-                        for x in (pl.placements or [])
-                        if x.get("position_id") not in pids
-                    ]
-                    pl.n_parts = remaining
-        touched_wo_ids = {w.work_order_id for w in wis}
-        if touched_wo_ids:
-            empty_wos = (
-                db.query(WorkOrder)
-                .filter(chunked_in(WorkOrder.id, touched_wo_ids))
-                .all()
-            )
-            for wo in empty_wos:
-                cnt = db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).count()
-                if cnt == 0:
-                    db.delete(wo)
-        db.add(
-            AuditLog(
-                actor=actor.email,
-                action="order_rollback",
-                entity="order",
-                entity_id=order.no,
-                detail={"step": "planned", "positions": len(pids)},
-            )
-        )
-        detail["positions"] = len(pids)
-    elif last == "released":
-        order.released = False
-        order.release_note = f"Zurückgerollt durch {actor.email}"
-        db.add(
-            AuditLog(
-                actor=actor.email,
-                action="order_rollback",
-                entity="order",
-                entity_id=order.no,
-                detail={"step": "released", "to": False},
-            )
-        )
-    else:
+    try:
+        order_flow._claim(db, order, None)
+    except order_flow.FlowError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    if order.cancelled_at is not None:
+        db.rollback()
         raise HTTPException(
-            status_code=422, detail=f"Schritt „{last}“ kann nicht zurückgerollt werden."
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stornierter Auftrag kann nicht zurückgerollt werden.",
+        )
+
+    try:
+        rolled = _rollback_one(db, order, actor, last)
+        db.flush()
+    except HTTPException:
+        db.rollback()
+        raise
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        log.exception("Legacy-Rollback bei %s (%s) fehlgeschlagen", order.no, last)
+        raise HTTPException(
+            status_code=500, detail=f"Rollback bei {last} fehlgeschlagen."
         )
 
     db.commit()
@@ -2200,6 +2202,6 @@ def order_rollback_legacy(
     return {
         "no": order.no,
         "rolled_back": last,
-        "detail": detail,
+        "detail": {"from": last, **rolled},
         "steps": _build_timeline(db, order),
     }

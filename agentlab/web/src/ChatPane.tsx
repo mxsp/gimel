@@ -75,6 +75,8 @@ function writeStepPref(kind: string | undefined, value: string): void {
 
 const ACCEPT = ".pdf,.txt,.md,.markdown,.csv,.json,.log,.html,.htm,.svg,.xml,.css,.js,.ts,.tsx,.jsx,.py,.yaml,.yml,.sql";
 const PREVIEW_WIDTH_KEY = "agentlab-preview-width";
+const cachedProviderModels = new Map<number, ModelInfo[]>();
+const attemptedProviderModelFetch = new Set<number>();
 
 /** Eine Antwort ist ein Zug, nicht jeder Werkzeugschritt.
  *
@@ -675,8 +677,9 @@ export default function ChatPane({
     if (atBottom) scrollToBottom();
   }, [detail, live, localPrompt, atBottom, scrollToBottom]);
 
-  const [fetchedModels, setFetchedModels] = useState<Record<number, ModelInfo[]>>({});
-  const fetchedIdsRef = useRef<Set<number>>(new Set());
+  const [fetchedModels, setFetchedModels] = useState<Record<number, ModelInfo[]>>(
+    () => Object.fromEntries(cachedProviderModels.entries()),
+  );
   const provider = useMemo(
     () => providers.find((p) => p.id === chat.provider_id)
       ?? providers.find((p) => p.is_default)
@@ -684,12 +687,18 @@ export default function ChatPane({
     [providers, chat.provider_id],
   );
   useEffect(() => {
-    if (!provider || provider.models.length > 0 || fetchedIdsRef.current.has(provider.id)) return;
+    if (!provider) return;
+    if (provider.models.length > 0) {
+      cachedProviderModels.set(provider.id, provider.models);
+      return;
+    }
+    if (cachedProviderModels.has(provider.id) || attemptedProviderModelFetch.has(provider.id)) return;
     if (!provider.has_key && provider.requires_key !== false) return;
-    fetchedIdsRef.current.add(provider.id);
+    attemptedProviderModelFetch.add(provider.id);
     loadProviderModels(provider.id, false)
       .then((res) => {
         if (res.models?.length) {
+          cachedProviderModels.set(provider.id, res.models);
           setFetchedModels((prev) => ({ ...prev, [provider.id]: res.models }));
         }
       })

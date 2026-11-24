@@ -251,9 +251,15 @@
 }
 .rail-app-link.is-active {
   background: var(--rail-surface);
-  color: var(--rail-text);
+  color: var(--rail-accent-ink);
   font-weight: 650;
-  box-shadow: var(--rail-shadow-xs), inset 0 0 0 1px var(--rail-line);
+  box-shadow: var(--rail-shadow-xs), inset 0 0 0 1px color-mix(in srgb, var(--rail-accent) 32%, var(--rail-line));
+}
+:root[data-theme="dark"] .rail-app-link.is-active {
+  background: var(--rail-surface-2);
+}
+.rail-app-link.is-active .bp5-icon {
+  color: var(--rail-accent-ink);
 }
 
 /* ==========================================================================

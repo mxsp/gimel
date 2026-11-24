@@ -17,6 +17,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import chunked_in, get_db
@@ -444,34 +445,41 @@ def create_customer(
         vat_id=body.vat_id,
         office_note=body.office_note.strip(),
     )
-    db.add(user)
-    db.flush()
+    try:
+        db.add(user)
+        db.flush()
 
-    # Anschriften im selben Vorgang. Rechnungs- und Lieferstandard arbitriert
-    # der gemeinsame Helfer — zwei Rechnungsanschriften sind keine Angabe,
-    # sondern ein Fehler, der später an der Kasse auffällt.
-    for addr in body.addresses:
-        db.add(Address(user_id=user.id, **addr.model_dump()))
-    db.flush()
-    ensure_flags(db, user.id)
+        # Anschriften im selben Vorgang. Rechnungs- und Lieferstandard arbitriert
+        # der gemeinsame Helfer — zwei Rechnungsanschriften sind keine Angabe,
+        # sondern ein Fehler, der später an der Kasse auffällt.
+        for addr in body.addresses:
+            db.add(Address(user_id=user.id, **addr.model_dump()))
+        db.flush()
+        ensure_flags(db, user.id)
 
-    db.add(
-        AuditLog(
-            actor=actor.email,
-            action="desk_customer_create",
-            entity="user",
-            entity_id=str(user.id),
-            detail={
-                "email": email,
-                "company": body.company,
-                "price_group": body.price_group,
-                "discount_pct": body.discount_pct,
-                "payment_terms": body.payment_terms,
-                "addresses": len(body.addresses),
-            },
+        db.add(
+            AuditLog(
+                actor=actor.email,
+                action="desk_customer_create",
+                entity="user",
+                entity_id=str(user.id),
+                detail={
+                    "email": email,
+                    "company": body.company,
+                    "price_group": body.price_group,
+                    "discount_pct": body.discount_pct,
+                    "payment_terms": body.payment_terms,
+                    "addresses": len(body.addresses),
+                },
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="E-Mail-Adresse oder Kundennummer ist bereits vergeben.",
+        ) from exc
     db.refresh(user)
     return _out(db, user)
 
@@ -580,11 +588,13 @@ def add_address(
 ) -> Address:
     user = _get_customer(db, customer_id)
     addr = Address(user_id=user.id, **body.model_dump())
+    db.add(addr)
+    db.flush()
     if body.is_billing:
         clear_flag_on_others(db, user.id, keep_id=addr.id, flag="is_billing")
     if body.is_delivery:
         clear_flag_on_others(db, user.id, keep_id=addr.id, flag="is_delivery")
-    db.add(addr)
+    ensure_flags(db, user.id)
     db.add(
         AuditLog(
             actor=actor.email,
@@ -594,9 +604,6 @@ def add_address(
             detail={"city": body.city},
         )
     )
-    db.commit()
-    db.refresh(addr)
-    ensure_flags(db, user.id)
     db.commit()
     db.refresh(addr)
     return addr

@@ -71,6 +71,10 @@ try {
   // Ohne Fahrplan gilt die alte Rechnung (ältere Server).
   const old = robotPoseAt({ ...planned, sim_plan: null, progress_m: 3 }, new Date(epoch).toISOString(), epoch);
   assert.deepEqual([old.x, old.y], [3, 0]);
+  // Abweichende Client-Uhr: mit lokalem Empfangszeitpunkt bleibt die Lage bei serverZeit + elapsed.
+  const skewedNow = epoch - 600_000;
+  const synced = robotPoseAt(planned, new Date(epoch + 12_000).toISOString(), skewedNow, skewedNow);
+  assert.deepEqual([synced.x, synced.y], [p12.x, p12.y]);
 
   console.log("Robot path checks passed: loop, pingpong, extrapolation, unknown position.");
 } finally {

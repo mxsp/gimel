@@ -95,6 +95,7 @@ class ToolSpec:
     reversible: bool = True
     network: bool = False
     sandbox: bool = False
+    orchestrator_only: bool = False
 
 
 def _iso(value) -> str | None:
@@ -4019,18 +4020,6 @@ TOOL_SPECS = [
                       "due_date": {"type": "string", "description": "ISO-Datum (YYYY-MM-DD) oder ISO-Zeitstempel; null/leer löscht das Datum."},
                       "due": {"type": "string"}}, ["order_no"]),
              set_order_due_date, write=True, roles=frozenset(OFFICE)),
-    ToolSpec("update_order_due_date", "Set or clear the promised/due date of one order.",
-             _schema({"order_no": {"type": "string"},
-                      "due_date": {"type": "string"}, "due": {"type": "string"}}, ["order_no"]),
-             update_order_due_date, write=True, roles=frozenset(OFFICE)),
-    ToolSpec("change_order_due_date", "Set or clear the promised/due date of one order.",
-             _schema({"order_no": {"type": "string"},
-                      "due_date": {"type": "string"}, "due": {"type": "string"}}, ["order_no"]),
-             change_order_due_date, write=True, roles=frozenset(OFFICE)),
-    ToolSpec("set_order_due", "Set or clear the promised/due date of one order.",
-             _schema({"order_no": {"type": "string"},
-                      "due_date": {"type": "string"}, "due": {"type": "string"}}, ["order_no"]),
-             set_order_due, write=True, roles=frozenset(OFFICE)),
     ToolSpec("block_order", "Block or unblock an order with a reason; block is separate from release.",
              _schema({"order_no": {"type": "string"}, "blocked": {"type": "boolean"},
                       "reason": {"type": "string"}}, ["order_no"]),
@@ -4606,6 +4595,18 @@ from .sandbox_tools import SANDBOX_SPECS  # noqa: E402
 TOOL_SPECS.extend(SANDBOX_SPECS)
 
 TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
+# Rückwärtskompatible Aufruf-Aliase (nur ein Schema in TOOL_SPECS, spart Modell-Budget).
+for _alias_name, _alias_fn in (
+    ("update_order_due_date", update_order_due_date),
+    ("change_order_due_date", change_order_due_date),
+    ("set_order_due", set_order_due),
+):
+    _base_spec = TOOLS["set_order_due_date"]
+    TOOLS[_alias_name] = ToolSpec(
+        _alias_name, _base_spec.description, _base_spec.parameters, _alias_fn,
+        write=_base_spec.write, roles=_base_spec.roles,
+        admin_only=_base_spec.admin_only, reversible=_base_spec.reversible,
+    )
 
 
 def allowed(spec: ToolSpec, user: User) -> bool:
@@ -4633,6 +4634,8 @@ def live_write_ok(spec: ToolSpec) -> bool:
 
 def _tool_priority(spec: ToolSpec, *, route: str = "") -> tuple[int, int]:
     """Niedrigere Zahl = höhere Priorität beim Kürzen auf MAX_PROVIDER_TOOLS."""
+    if spec.orchestrator_only:
+        return (0, 0)
     cat = category_of(spec.name)
     r = (route or "").lower()
     on_twin = any(k in r for k in ("twin", "studio", "grundriss", "robot"))
@@ -4697,9 +4700,12 @@ def schemas_for(user: User, write_mode: bool, *, web_enabled: bool = True,
                 max_tools: int | None = None,
                 query: str = "",
                 recent_tools: set[str] | None = None,
-                preferred_categories: set[str] | None = None) -> list[dict]:
+                preferred_categories: set[str] | None = None,
+                is_orchestrator: bool = False) -> list[dict]:
     allowed_specs = []
     for spec in TOOL_SPECS:
+        if spec.orchestrator_only and not is_orchestrator:
+            continue
         if spec.write and not write_mode:
             continue
         if hands_free and not live_write_ok(spec):

@@ -112,4 +112,22 @@ assert.equal(sSpots[0].severity, "danger");
 assert.ok(sSpots[0].radius > 1.5);
 assert.equal(m.supplyRiskSpots(st, null).length, 0);
 
+// Prognose + Termine-Linse: bei fehlender Uhrzeit oder bereits späten Aufgaben nicht „keine Termine“.
+const mk = await bundle("src/components/twin/marks.ts");
+const stDue = [{ id: 10, label: "Plotter", type: "production", active: true, x: 5, y: 5, w: 3, h: 2, rotation: 0,
+  colour: "#0a5b9c", routing: "pull", materials: [], thicknesses: [], assigned_users: [],
+  queue_jobs: 1, queue_min: 600, capacity_min_per_day: 450, is_storage: false, note: "" }];
+const lateMarks = mk.buildMarks({
+  stations: stDue,
+  schedules: { 10: { times_known: true, changeovers: 0, slots: [{ seq: 1, kind: "cut", ref: "IA-1", label: "x", mat: "EPDM", thk: 2, changeover: false, late: true, day: 1, rush: false, started: false, orders: [], customers: [] }] } },
+  suggestions: {}, step: 1, lens: "termine", flow: [], stale: false,
+});
+assert.ok(lateMarks[10].line.includes("spät"), lateMarks[10].line);
+const unknownTimeMarks = mk.buildMarks({
+  stations: stDue,
+  schedules: { 10: { times_known: false, changeovers: 0, slots: [{ seq: 1, kind: "cut", ref: "IA-2", label: "x", mat: "EPDM", thk: 2, changeover: false, late: false, day: 1, rush: false, started: false, orders: [], customers: [] }] } },
+  suggestions: {}, step: 1, lens: "termine", flow: [], stale: false,
+});
+assert.equal(unknownTimeMarks[10].line, "Terminlage ?");
+
 console.log("twin-studio: ok");

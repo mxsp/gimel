@@ -4,6 +4,7 @@ import { materialGroupLabel } from "../constants";
 import { RefLink } from "../components/RefLink";
 import NonIdealState from "../components/NonIdealState";
 import Callout from "../components/Callout";
+import { SectionError } from "../components/PageStates";
 import NewProductDialog from "../components/NewProductDialog";
 import StockTimeline from "../components/StockTimeline";
 import { LocationsPanel, OffcutsPanel } from "../components/LagerPanels";
@@ -72,6 +73,7 @@ const DAY_MS = 86_400_000;
 
 function StockPanel() {
   const [rows, setRows] = useState<StockRow[] | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [movements, setMovements] = useState<Movement[] | null>(null);
   const [adjust, setAdjust] = useState("0");
@@ -115,8 +117,11 @@ function StockPanel() {
   const load = useCallback(async () => {
     try {
       setRows(await fetchRows());
+      setLoadError("");
     } catch (e: any) {
-      toastError(e.message);
+      const msg = e?.message ?? String(e);
+      setLoadError(msg);
+      toastError(msg);
     }
     void loadLocs();
   }, [fetchRows, loadLocs]);
@@ -222,7 +227,7 @@ function StockPanel() {
           {inactive && <FilterTag label="stillgelegte zeigen" onRemove={() => setInactive(false)} />}
         </Toolbar>
 
-        {!rows ? <Spinner size={30} /> : shown.length === 0 ? (
+        {loadError && !rows ? <SectionError message={loadError} onRetry={load} /> : !rows ? <Spinner size={30} /> : shown.length === 0 ? (
           all.length === 0
             ? <NonIdealState icon="box" title="Noch keine Werkstoffe"
                              description="Ein Werkstoff ist die Lagerposition: Platten, Formate und Preis werden daran geführt."

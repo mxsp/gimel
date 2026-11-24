@@ -14,6 +14,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from ..db import chunked_in
 from ..models import AuditLog, OrderPosition, Product, WorkItem, WorkOrder, WorkOrderStatus
 from .inventory import move_stock
 from . import offcuts as offcut_svc
@@ -42,6 +43,24 @@ def cancel_work_order(
             f"{wo.no} ist {wo.status.value} — nur offene Innenaufträge können "
             "storniert werden."
         )
+
+    # Atomarer Zustandsübergang: verhindert doppelte Bestandsrückbuchung bei
+    # gleichzeitigen Storno-Anfragen.
+    claimed = (
+        db.query(WorkOrder)
+        .filter(WorkOrder.id == wo.id, WorkOrder.status == WorkOrderStatus.open)
+        .update({WorkOrder.status: WorkOrderStatus.cancelled}, synchronize_session=False)
+    )
+    if claimed != 1:
+        db.expire(wo, ["status"])
+        if wo.status == WorkOrderStatus.cancelled:
+            return {"work_order_no": wo.no, "already_cancelled": True,
+                    "position_ids": [], "items_removed": 0, "stock_returned": 0}
+        raise ValueError(
+            f"{wo.no} ist {wo.status.value} — nur offene Innenaufträge können "
+            "storniert werden."
+        )
+    wo.status = WorkOrderStatus.cancelled
 
     items = db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
     position_ids = sorted({int(i.position_id) for i in items if i.position_id})
@@ -73,7 +92,7 @@ def cancel_work_order(
     if position_ids:
         (
             db.query(OrderPosition)
-            .filter(OrderPosition.id.in_(position_ids))
+            .filter(chunked_in(OrderPosition.id, position_ids))
             .filter(OrderPosition.production_status != "done")
             .update({OrderPosition.production_status: "pending"},
                     synchronize_session=False)
@@ -82,7 +101,6 @@ def cancel_work_order(
     for plate in wo.plates:
         plate.status = WorkOrderStatus.open
 
-    wo.status = WorkOrderStatus.cancelled
     wo.order_done = {}
     wo.material_staged_at = None
     wo.material_staged_by = ""

@@ -221,7 +221,7 @@ def improve_route(
         _audit(db, admin, "robot_route_improve", _row, changed=changed, metres_before=before_m,
                metres_after=round(imp.metres_after, 2), detours=imp.detours, rerouted=imp.rerouted)
     result["applied"] = bool(changed)
-    result["robot"] = robot_fleet.as_dict(_row)
+    result["robot"] = robot_fleet.as_dict(_row, db=db)
     return result
 
 
@@ -234,7 +234,7 @@ def get_robot(
     row = db.get(RobotAsset, robot_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Roboter nicht gefunden.")
-    return robot_fleet.as_dict(row)
+    return robot_fleet.as_dict(row, db=db)
 
 
 @router.post("/robots", status_code=201)
@@ -245,7 +245,7 @@ def create_robot(
 ) -> dict:
     row, _changed = _store(RobotAsset(), _clean(body, db), db, new=True)
     _audit(db, admin, "robot_create", row)
-    return robot_fleet.as_dict(row)
+    return robot_fleet.as_dict(row, db=db)
 
 
 @router.put("/robots/{robot_id}")
@@ -261,7 +261,7 @@ def update_robot(
     _row, changed = _store(row, _clean(body, db), db)
     if changed:
         _audit(db, admin, "robot_update", _row, changed=changed)
-    return robot_fleet.as_dict(_row)
+    return robot_fleet.as_dict(_row, db=db)
 
 
 @router.delete("/robots/{robot_id}", status_code=204)

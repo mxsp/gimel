@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 import wave
+import weakref
 from pathlib import Path
 
 from gimel.win_subproc import hidden_subprocess_kwargs
@@ -53,17 +54,19 @@ MAX_CHARS = 3000
 
 _piper_cache: dict[str, object] = {}
 _piper_lock = threading.Lock()
+_install_lock = threading.Lock()
 # Höchstens zwei Synthesen zugleich (Gimel Voice holt den nächsten Satz vorab).
 # Wartende halten keinen Thread: das Semaphor sitzt vor ``to_thread``.
 # Je Ereignisschleife eines (ein Semaphor gehört zu genau einer Schleife).
-_piper_slots: dict[int, asyncio.Semaphore] = {}
+_piper_slots: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
 
 
 def _slots() -> asyncio.Semaphore:
-    key = id(asyncio.get_running_loop())
-    slot = _piper_slots.get(key)
+    loop = asyncio.get_running_loop()
+    slot = _piper_slots.get(loop)
     if slot is None:
-        slot = _piper_slots[key] = asyncio.Semaphore(2)
+        slot = asyncio.Semaphore(2)
+        _piper_slots[loop] = slot
     return slot
 
 
@@ -154,36 +157,37 @@ def install_piper(voice: str = PIPER_DEFAULT) -> dict:
             "bitte Piper separat installieren oder den Quell-/Setup-Modus verwenden."
         )
 
-    if not _piper_installed():
-        res = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "piper-tts>=1.2", "--quiet"],
-            capture_output=True,
-            text=True,
-            check=False,
-            **hidden_subprocess_kwargs(),
-        )
-        if res.returncode != 0:
-            detail = (res.stderr or res.stdout or "").strip()[-400:]
-            raise RuntimeError(f"Installation von piper-tts fehlgeschlagen: {detail}")
+    with _install_lock:
+        if not _piper_installed():
+            res = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "piper-tts>=1.2", "--quiet"],
+                capture_output=True,
+                text=True,
+                check=False,
+                **hidden_subprocess_kwargs(),
+            )
+            if res.returncode != 0:
+                detail = (res.stderr or res.stdout or "").strip()[-400:]
+                raise RuntimeError(f"Installation von piper-tts fehlgeschlagen: {detail}")
 
-    folder = piper_dir()
-    folder.mkdir(parents=True, exist_ok=True)
-    onnx = folder / f"{chosen}.onnx"
-    cfg = folder / f"{chosen}.onnx.json"
-    if not (onnx.is_file() and cfg.is_file()):
-        dl = subprocess.run(
-            [sys.executable, "-m", "piper.download_voices", "--download-dir", str(folder), chosen],
-            capture_output=True,
-            text=True,
-            check=False,
-            **hidden_subprocess_kwargs(),
-        )
-        if dl.returncode != 0:
-            detail = (dl.stderr or dl.stdout or "").strip()[-400:]
-            raise RuntimeError(f"Download der Stimme '{chosen}' fehlgeschlagen: {detail}")
+        folder = piper_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        onnx = folder / f"{chosen}.onnx"
+        cfg = folder / f"{chosen}.onnx.json"
+        if not (onnx.is_file() and cfg.is_file()):
+            dl = subprocess.run(
+                [sys.executable, "-m", "piper.download_voices", "--download-dir", str(folder), chosen],
+                capture_output=True,
+                text=True,
+                check=False,
+                **hidden_subprocess_kwargs(),
+            )
+            if dl.returncode != 0:
+                detail = (dl.stderr or dl.stdout or "").strip()[-400:]
+                raise RuntimeError(f"Download der Stimme '{chosen}' fehlgeschlagen: {detail}")
 
-    with _piper_lock:
-        _piper_cache.clear()
+        with _piper_lock:
+            _piper_cache.clear()
     return piper_status()
 
 

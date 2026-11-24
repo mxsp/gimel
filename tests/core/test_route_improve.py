@@ -97,3 +97,12 @@ def test_improving_twice_changes_nothing():
         once = ri.improve(lay, raw, loop=loop)
         twice = ri.improve(lay, [list(p) for p in once.points], loop=loop)
         assert not twice.changed, (raw, once.points, twice.points)
+
+
+def test_detour_catches_long_wall_whose_vertices_lie_outside_search_margin():
+    long_wall = [(2, 14), (58, 14), (58, 16), (2, 16)]
+    pts = ri.detour((30, 10), (30, 20), [long_wall], ((0, 0), (60, 0), (60, 30), (0, 30)))
+    assert pts is not None and len(pts) > 2
+    from gimel.core.layout import segment_blocked
+    walls = [ri._box(long_wall, ri.CLEARANCE_M)]
+    assert not any(segment_blocked(a, b, walls) for a, b in zip(pts, pts[1:]))

@@ -5,6 +5,7 @@ import { api, fmtDateTime, fmtEur } from "../api";
 import { toastError, toastSuccess } from "../toast";
 import { GLOBAL_MATERIAL_SEARCH_EVENT, consumeGlobalMaterialSearch } from "../components/GlobalMaterialSearch";
 import NewProductDialog from "../components/NewProductDialog";
+import { SectionError } from "../components/PageStates";
 import { PRODUCT_CATS, productCatLabel } from "../constants";
 import { plural } from "../plural";
 import {
@@ -84,6 +85,7 @@ export default function Materials() {
 // --------------------------------------------------------------------------
 function MatrixPanel() {
   const [view, setView] = useState<MatrixView | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [draft, setDraft] = useState<Record<string, { eur_m2: number; sheets: number[][] }>>({});
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
@@ -105,10 +107,14 @@ function MatrixPanel() {
   }, []);
 
   const load = useCallback(async () => {
-    setView(null); setDraft({});
+    setView(null); setDraft({}); setLoadError("");
     try {
       setView(await api<MatrixView>(`/api/products/matrix/view?include_inactive=${inactive}`));
-    } catch (e: any) { toastError(e.message); }
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setLoadError(msg);
+      toastError(msg);
+    }
   }, [inactive]);
   useEffect(() => { load(); }, [load]);
 
@@ -155,6 +161,7 @@ function MatrixPanel() {
     } catch (e: any) { toastError(e.message); }
   };
 
+  if (loadError && !view) return <SectionError message={loadError} onRetry={load} />;
   if (!view) return <Spinner size={30} />;
 
   const needle = filter.trim().toLowerCase();
@@ -557,14 +564,21 @@ interface RateHistoryRow { at: string; actor: string; old: number; new: number; 
 
 function RatesPanel() {
   const [rows, setRows] = useState<RateRow[] | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [edit, setEdit] = useState<Record<string, number>>({});
   const [reason, setReason] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const [history, setHistory] = useState<{ key: string; rows: RateHistoryRow[] } | null>(null);
 
   const load = useCallback(async () => {
-    try { setRows(await api<RateRow[]>("/api/rates")); }
-    catch (e: any) { toastError(e.message); }
+    try {
+      setRows(await api<RateRow[]>("/api/rates"));
+      setLoadError("");
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setLoadError(msg);
+      toastError(msg);
+    }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -588,6 +602,7 @@ function RatesPanel() {
     catch (e: any) { toastError(e.message); }
   };
 
+  if (loadError && !rows) return <SectionError message={loadError} onRetry={load} />;
   if (!rows) return <Spinner size={30} />;
 
   return (

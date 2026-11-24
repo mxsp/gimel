@@ -8,6 +8,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, selectinload
 
 from sqlalchemy import func
@@ -214,12 +215,19 @@ def create_user(body: UserCreate, db: Annotated[Session, Depends(get_db)],
                 company=body.company.strip(), role=body.role, price_group=body.price_group,
                 discount_pct=body.discount_pct, payment_terms=body.payment_terms,
                 customer_no=customer_no)
-    db.add(user)
-    db.flush()
-    db.add(AuditLog(actor=actor.email, action="user_create", entity="user",
-                    entity_id=str(user.id),
-                    detail={"email": email, "role": body.role.value, "customer_no": customer_no}))
-    db.commit()
+    try:
+        db.add(user)
+        db.flush()
+        db.add(AuditLog(actor=actor.email, action="user_create", entity="user",
+                        entity_id=str(user.id),
+                        detail={"email": email, "role": body.role.value, "customer_no": customer_no}))
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="E-Mail-Adresse oder Kundennummer ist bereits vergeben.",
+        ) from exc
     db.refresh(user)
     return user
 

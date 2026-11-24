@@ -1,6 +1,7 @@
 import { Button, HTMLSelect, HTMLTable, InputGroup, Spinner, Switch, Tab, Tabs, Tag } from "@blueprintjs/core";
 import NonIdealState from "../components/NonIdealState";
 import Callout from "../components/Callout";
+import { SectionError } from "../components/PageStates";
 import type { Intent } from "@blueprintjs/core";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtDateTime } from "../api";
@@ -250,12 +251,19 @@ const BOOLEAN_KEYS = new Set([
 
 function SettingsPanel() {
   const [rows, setRows] = useState<SettingRow[] | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [edit, setEdit] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
 
   const load = useCallback(async () => {
-    try { setRows(await api<SettingRow[]>("/api/admin/settings")); }
-    catch (e: any) { toastError(e.message); }
+    try {
+      setRows(await api<SettingRow[]>("/api/admin/settings"));
+      setLoadError("");
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setLoadError(msg);
+      toastError(msg);
+    }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -277,6 +285,7 @@ function SettingsPanel() {
     setEdit((e) => { const n = { ...e }; delete n[key]; return n; });
   };
 
+  if (loadError && !rows) return <SectionError message={loadError} onRetry={load} />;
   if (!rows) return <Spinner size={30} />;
   if (!rows.length) return <p className="sub">Keine Parameter hinterlegt.</p>;
 

@@ -1741,6 +1741,11 @@ a.sidebar-link:focus-visible, .sidebar-skip:focus-visible { outline: 2px solid v
   gap: 16px;
   align-items: start;
 }
+:root .heute-focus-tabs {
+  flex-wrap: wrap;
+  overflow-x: visible;
+  row-gap: 2px;
+}
 .heute-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .heute-sec {
   border: 1px solid var(--g-rule);
@@ -1809,7 +1814,7 @@ a.heute-row .bp5-tag { flex-shrink: 0; }
 }
 .heute-fact { display: flex; gap: 6px; }
 .heute-fact dd { margin: 0; color: var(--g-text); font-weight: 600; font-variant-numeric: tabular-nums; }
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .heute-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -2138,7 +2143,8 @@ a.heute-row .bp5-tag { flex-shrink: 0; }
 .twin-name { font-weight: 600; }
 .twin-text-on { fill: var(--g-floor-on-station); paint-order: stroke; stroke: var(--g-floor-station); }
 .twin-text-off { fill: var(--g-text-strong); paint-order: stroke; stroke: var(--g-floor-hall); }
-.twin-map-text { fill: var(--g-text-2); paint-order: stroke; stroke: var(--g-floor-hall); opacity: 1; }
+.twin-map-text { fill: var(--g-text-2); paint-order: stroke; stroke: var(--g-floor-hall); stroke-linejoin: round; opacity: 1; }
+.floor-door .twin-map-text { stroke: var(--g-floor-outside); }
 .twin-ring { fill: none; stroke: var(--gimel-accent-ink); stroke-width: 3px; }
 .twin-ring-find { stroke: var(--g-text-strong); stroke-width: 2.5px; }
 .floor-station.twin-station:focus-visible > .twin-body { stroke: var(--gimel-accent-ink); stroke-width: 4px; }
@@ -2290,7 +2296,7 @@ a.heute-row .bp5-tag { flex-shrink: 0; }
 .hall-editor .editor-framework-bar .bp5-button { min-height: 22px; padding: 1px 5px; font-size: 12px; }
 .hall-editor .editor-split { flex: 1; min-height: 0; gap: 0; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
 .hall-editor .editor-main { display: flex; flex-direction: column; gap: 6px; min-height: 0; padding: 8px 8px 4px 16px; }
-.hall-editor .floor-issues { flex: none; max-height: 84px; margin: 0; overflow-y: auto; }
+.hall-editor .floor-issues { flex: none; max-height: 58px; margin: 0; overflow-y: auto; }
 .hall-editor .floor-issues:focus-visible { outline: 2px solid var(--gimel-accent-ink); }
 .hall-editor .floor-card { flex: 1; display: flex; flex-direction: column; min-height: 460px; }
 .hall-editor .floor-toolbar { position: relative; z-index: 2; background: var(--g-surface-2); min-height: 46px; box-sizing: border-box; }
@@ -2325,14 +2331,22 @@ a.heute-row .bp5-tag { flex-shrink: 0; }
 .hall-editor .rail-section-body .editor-actions { position: static; margin-top: 8px; padding: 0; border-top: 0; background: transparent; }
 .hall-editor .editor-form > .editor-actions { position: sticky; bottom: 0; z-index: 5; margin-top: 12px; padding: 10px 0; border-top: 1px solid var(--g-rule); background: var(--g-surface); }
 
-@media (min-width: 1101px) {
+@media (min-width: 901px) {
   .app-main:has(> .hall-editor) { display: flex; flex-direction: column; overflow: auto; }
-  .hall-editor { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 560px; }
+  .hall-editor { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 520px; }
 }
-@media (max-width: 1100px) {
+@media (max-width: 1180px) and (min-width: 901px) {
+  .hall-head { padding: 5px 10px; gap: 3px 8px; }
+  .hall-editor .editor-tools-wrap { padding: 3px 10px; }
+  .hall-editor .editor-split { grid-template-columns: minmax(0, 1fr) 280px; }
+  .hall-editor .editor-main { padding: 6px 6px 4px 10px; }
+  .hall-editor .floor-card { min-height: 360px; }
+  .hall-editor .floor-stage { min-height: 320px; }
+}
+@media (max-width: 900px) {
   .hall-editor .editor-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
   .hall-editor .editor-main { padding-right: 16px; }
-  .hall-editor .floor-stage { flex: none; height: 62vh; min-height: 320px; }
+  .hall-editor .floor-stage { flex: none; height: 54vh; min-height: 300px; }
   .hall-editor .editor-rail { padding: 0 16px 16px; border-left: 0; overflow: visible; }
   .hall-editor .editor-rail .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -97,6 +97,10 @@ def issue(db: Session, order_no: str, data: dict, *, delivery: date, due_days: i
     try:
         seq = _next_seq(db, issued.year)
         order = _fresh_order(db, order_no)
+        if order.cancelled_at is not None:
+            raise Refused("Der Auftrag ist storniert und kann nicht berechnet werden.")
+        if order.blocked:
+            raise Refused("Der Auftrag ist noch gesperrt und kann nicht berechnet werden.")
         if order.invoice_no:
             raise Refused(f"Es gibt bereits eine Rechnung ({order.invoice_no}). "
                           "Korrektur nur per Storno.")
@@ -134,6 +138,8 @@ def cancel(db: Session, order_no: str, original_no: str, reason: str, *, actor: 
     try:
         seq = _next_seq(db, issued.year)
         order = _fresh_order(db, order_no)
+        if order.paid:
+            raise Refused("Eine bezahlte Rechnung wird nicht storniert, sondern gutgeschrieben.")
         if order.invoice_no != original_no:
             raise Refused(f"Rechnung {original_no} ist nicht mehr die gültige Rechnung dieses Auftrags.")
         original = db.query(LocalInvoice).filter(LocalInvoice.number == original_no).one()

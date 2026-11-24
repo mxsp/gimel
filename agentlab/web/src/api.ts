@@ -907,6 +907,7 @@ export const deleteKnowledgeNode = (nodeKey: string) =>
 export interface AgentConfig {
   configured: boolean;
   admin: boolean;
+  voice_enabled?: boolean;
   web_enabled: boolean;
   max_steps: number;
   orchestrator_max_steps: number;
@@ -1046,6 +1047,9 @@ export const listChanges = (chatId?: number) =>
 
 export const revertChange = (chatId: number, changeId: number) =>
   api<Change>(`/api/agent/chats/${chatId}/changes/${changeId}/revert`, { method: "POST" });
+
+export const revertAnyChange = (changeId: number) =>
+  api<Change>(`/api/agent/changes/${changeId}/revert`, { method: "POST" });
 
 export const revertMessage = (chatId: number, messageId: number) =>
   api<{ reverted: number; changes: Change[] }>(

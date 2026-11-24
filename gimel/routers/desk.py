@@ -29,6 +29,7 @@ from typing import Annotated, Any, Literal, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -366,8 +367,15 @@ def create_order(
                     credit_limit=nc.credit_limit,
                     vat_id=nc.vat_id,
                 )
-                db.add(customer)
-                db.flush()
+                try:
+                    db.add(customer)
+                    db.flush()
+                except IntegrityError as exc:
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="E-Mail-Adresse oder Kundennummer ist bereits vergeben.",
+                    ) from exc
                 db.add(
                     AuditLog(
                         actor=actor.email,

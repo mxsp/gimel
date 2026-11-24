@@ -1,6 +1,7 @@
 import { Button, Checkbox, Classes, Dialog, Drawer, FormGroup, HTMLSelect, HTMLTable, InputGroup, ProgressBar, Spinner, Tag, TextArea, Alert, Switch } from "@blueprintjs/core";
 import NonIdealState from "../components/NonIdealState";
 import Callout from "../components/Callout";
+import { SectionError } from "../components/PageStates";
 import { COUNTRIES, PAYMENT_TERMS, PRICE_GROUPS, priceGroupLabel, withCurrent } from "../constants";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiWithCount, fmtDate, fmtEur } from "../api";
@@ -146,6 +147,7 @@ export default function Customers() {
   const [offset, setOffset] = useState(0);
   const [pageSize, setPageSize] = useState(100);
   const [loadingPage, setLoadingPage] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("alle");
   const [ageFilter, setAgeFilter] = useState("alle");
@@ -154,6 +156,7 @@ export default function Customers() {
   const [detail, setDetail] = useState<Customer | null>(null);
   const [detailOrders, setDetailOrders] = useState<CustomerOrder[]>([]);
   const [detailAddresses, setDetailAddresses] = useState<Address[]>([]);
+  const detailSeq = useRef(0);
   const { hidden, toggle, reset, ready } = useDefaultHidden(CUSTOMER_COLUMNS_KEY, CUSTOMER_COLUMNS_HIDDEN);
   const showColumn = (id: string) => ready && !hidden.includes(id);
 
@@ -168,8 +171,11 @@ export default function Customers() {
       const { data, total: hdrTotal } = await apiWithCount<Customer[]>(`/api/customers?${params.toString()}`);
       setRows(data);
       setTotal(hdrTotal ?? data.length);
+      setLoadError("");
     } catch (e: any) {
-      toastError(e.message);
+      const msg = e?.message ?? String(e);
+      setLoadError(msg);
+      toastError(msg);
     } finally {
       setLoadingPage(false);
     }
@@ -178,12 +184,20 @@ export default function Customers() {
   useEffect(() => { load(query, offset, pageSize); }, [offset, pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openDetail = async (c: Customer) => {
+    const mine = ++detailSeq.current;
     setDetail(c);
+    setDetailOrders([]);
+    setDetailAddresses([]);
     try {
-      setDetailOrders(await api<CustomerOrder[]>(`/api/customers/${c.id}/orders`));
-      setDetailAddresses(await api<Address[]>(`/api/customers/${c.id}/addresses`));
+      const [orders, addresses] = await Promise.all([
+        api<CustomerOrder[]>(`/api/customers/${c.id}/orders`),
+        api<Address[]>(`/api/customers/${c.id}/addresses`),
+      ]);
+      if (detailSeq.current !== mine) return;
+      setDetailOrders(orders);
+      setDetailAddresses(addresses);
     } catch (e: any) {
-      toastError(e.message);
+      if (detailSeq.current === mine) toastError(e.message);
     }
   };
 
@@ -200,7 +214,7 @@ export default function Customers() {
       .catch((e: any) => { toastError(e.message); if (alive) navigate("kunden"); });
     return () => { alive = false; };
   }, [linkedId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const closeDetail = () => { setDetail(null); if (linkedId) navigate("kunden"); };
+  const closeDetail = () => { ++detailSeq.current; setDetail(null); if (linkedId) navigate("kunden"); };
 
   const shown = sortRows((rows ?? []).filter((c) => {
     const byStatus = statusFilter === "alle" ? true
@@ -262,7 +276,7 @@ export default function Customers() {
         {ageFilter !== "alle" && <FilterTag label={ageLabel} onRemove={() => setAgeFilter("alle")} />}
       </Toolbar>
 
-      {!rows ? <Spinner size={30} /> : shown.length === 0 ? (
+      {loadError && !rows ? <SectionError message={loadError} onRetry={() => load()} /> : !rows ? <Spinner size={30} /> : shown.length === 0 ? (
         <NonIdealState icon="people" title="Keine Kunden gefunden" />
       ) : (
         <div className="table-scroll">

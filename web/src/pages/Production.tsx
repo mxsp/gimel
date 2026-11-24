@@ -164,16 +164,19 @@ export default function Production({ no = "" }: { no?: string }) {
   }, [offset, pageSize, filter]);
   useEffect(() => { load(offset, pageSize, filter); }, [offset, pageSize, filter, load]);
 
+  const detailSeq = useRef(0);
   const openDetail = useCallback(async (no: string, keep = false) => {
+    const seq = ++detailSeq.current;
     try {
       const d = await api<WorkOrderDetail>(`/api/production/work-orders/${no}`);
+      if (detailSeq.current !== seq) return;
       setDetail(d);
       /* Ein Tiefensprung kann einen Innenauftrag treffen, der nicht in den
          letzten 100 Zeilen steht. Dann fehlt die Zeile, unter der das Panel
          hängt — also einmal nach oben legen. */
       setRows((prev) => prev && !prev.some((w) => w.no === d.no) ? [d, ...prev] : prev);
       if (!keep) { setPlateIdx(0); setTag(undefined); setTab("platte"); }
-    } catch (e: any) { toastError(e.message); }
+    } catch (e: any) { if (detailSeq.current === seq) toastError(e.message); }
   }, []);
 
   /* Deep-Link aus Auftrag oder Form: #/produktion/WO-26-0012 öffnet den
@@ -192,6 +195,7 @@ export default function Production({ no = "" }: { no?: string }) {
   /* Die Einzelheiten stehen direkt unter der Zeile. Ein zweiter Klick schließt sie. */
   const toggle = (no: string) => {
     if (detail?.no === no) {
+      ++detailSeq.current;
       setDetail(null);
       if (wanted) navigate("produktion");
     } else {

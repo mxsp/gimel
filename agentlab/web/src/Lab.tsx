@@ -27,6 +27,8 @@ import Tools from "./Tools";
 
 type View = "chat" | "graph" | "agents" | "routines" | "artifacts" | "proposals" | "changes" | "stats" | "tools" | "settings";
 
+const ALL_VIEWS: View[] = ["chat", "graph", "agents", "routines", "artifacts", "proposals", "changes", "stats", "tools", "settings"];
+
 const VIEW_LABEL: Record<View, string> = {
   chat: "Chat", graph: "Wissensgraph", agents: "Agenten", routines: "Routinen", artifacts: "Artefakte",
   proposals: "Vorschläge", changes: "Änderungen", stats: "Statistik",
@@ -37,6 +39,15 @@ const VIEW_ICON: Record<View, string> = {
   proposals: "endorsed", changes: "changes", stats: "chart",
   tools: "wrench", settings: "cog",
 };
+const TAB_EST_WIDTH: Record<View, number> = {
+  chat: 72, graph: 120, agents: 86, routines: 88, artifacts: 116,
+  proposals: 122, changes: 108, stats: 88, tools: 100, settings: 114,
+};
+
+function formatRoleLabel(user: SessionUser): string {
+  const base = user.role === "admin" ? "Admin" : user.role === "worker" ? "Werker" : "Personal";
+  return user.adminWork ? `${base} · Betrieb` : base;
+}
 
 const PIN_KEY = "agentlab-pinned-chats";
 const SIDEBAR_KEY = "agentlab-sidebar";
@@ -131,6 +142,45 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
   const [darkTheme, setDarkTheme] = useState(() => document.documentElement.dataset.theme === "dark");
   const [refreshToken, setRefreshToken] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [tabsWidth, setTabsWidth] = useState<number>(() => (
+    window.innerWidth > 860 ? Math.max(320, window.innerWidth - 284) : window.innerWidth
+  ));
+
+  useEffect(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    const update = () => setTabsWidth(el.clientWidth);
+    update();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const { visibleViews, overflowViews } = useMemo(() => {
+    const total = ALL_VIEWS.reduce((sum, key) => sum + TAB_EST_WIDTH[key] + 3, 0);
+    if (tabsWidth <= 0 || total <= tabsWidth - 20) {
+      return { visibleViews: ALL_VIEWS, overflowViews: [] as View[] };
+    }
+    const budget = Math.max(120, tabsWidth - 118);
+    const vis: View[] = [];
+    const ovf: View[] = [];
+    let used = 0;
+    for (const key of ALL_VIEWS) {
+      const w = TAB_EST_WIDTH[key] + 3;
+      if (vis.length === 0 || (ovf.length === 0 && used + w <= budget)) {
+        vis.push(key);
+        used += w;
+      } else {
+        ovf.push(key);
+      }
+    }
+    return { visibleViews: vis, overflowViews: ovf };
+  }, [tabsWidth]);
 
   const current = useMemo(
     () => chats.find((c) => c.id === currentId) ?? null,
@@ -739,7 +789,7 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
                 <span className="lab-user-avatar" aria-hidden="true"><Icon icon="user" size={14} /></span>
                 <span className="lab-user-main">
                   <strong>{user.name || user.email}</strong>
-                  <span>{user.role}{user.adminWork ? " · Betrieb" : ""}</span>
+                  <span>{formatRoleLabel(user)}</span>
                 </span>
                 <Icon icon="more" size={14} aria-hidden="true" />
               </button>
@@ -837,8 +887,8 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
           <Button minimal icon="chat" text="Popup" className="lab-popup-button" onClick={openDrawer} />
         </div>
 
-        <div className="lab-tabs" role="tablist" aria-label="Bereiche">
-          {(["chat", "graph", "agents", "routines", "artifacts", "proposals", "changes", "stats", "tools", "settings"] as View[]).map((key) => (
+        <div ref={tabsRef} className="lab-tabs" role="tablist" aria-label="Bereiche">
+          {visibleViews.map((key) => (
             <button key={key} type="button" role="tab" aria-selected={view === key}
               className={view === key ? "is-active" : ""} onClick={() => openView(key)}>
               <Icon icon={VIEW_ICON[key] as any} size={14} aria-hidden="true" />
@@ -851,6 +901,42 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
               )}
             </button>
           ))}
+          {overflowViews.length > 0 && (
+            <Popover
+              minimal
+              placement="bottom-end"
+              content={
+                <Menu>
+                  {overflowViews.map((key) => (
+                    <MenuItem
+                      key={key}
+                      icon={VIEW_ICON[key] as any}
+                      active={view === key}
+                      text={
+                        key === "artifacts" && totalArtifacts > 0
+                          ? `${VIEW_LABEL[key]} (${totalArtifacts})`
+                          : key === "proposals" && pendingProposals > 0
+                            ? `${VIEW_LABEL[key]} (${pendingProposals})`
+                            : VIEW_LABEL[key]
+                      }
+                      onClick={() => openView(key)}
+                    />
+                  ))}
+                </Menu>
+              }
+            >
+              <button
+                type="button"
+                className={`lab-tabs-more${overflowViews.includes(view) ? " is-active" : ""}`}
+                aria-label="Weitere Bereiche"
+                aria-haspopup="menu"
+              >
+                <Icon icon="more" size={14} aria-hidden="true" />
+                <span>{overflowViews.includes(view) ? VIEW_LABEL[view] : "Mehr"}</span>
+                <Icon icon="caret-down" size={12} aria-hidden="true" />
+              </button>
+            </Popover>
+          )}
           <span className="lab-tabs-spacer" />
           {error && (
             <span className="lab-tabs-error" role="alert" title={error}>

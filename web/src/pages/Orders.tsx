@@ -331,18 +331,22 @@ export default function Orders() {
     return () => clearTimeout(timer);
   }, [q, offset, pageSize, filter, due, sort, load]);
 
-  const loadTimeline = useCallback(async (no: string) => {
+  const detailSeq = useRef(0);
+
+  const loadTimeline = useCallback(async (no: string, seq = ++detailSeq.current) => {
     try {
       const r = await api<{ steps: TimelineStep[] }>(`/api/admin/orders/${no}/timeline`);
-      setTimeline(r.steps);
-    } catch { setTimeline(null); }
+      if (detailSeq.current === seq) setTimeline(r.steps);
+    } catch { if (detailSeq.current === seq) setTimeline(null); }
   }, []);
 
-  const loadDetail = useCallback(async (no: string) => {
+  const loadDetail = useCallback(async (no: string, seq = ++detailSeq.current) => {
     setDetailError("");
     try {
-      setDetail(await api<AdminOrder>(`/api/admin/orders/${no}`));
+      const res = await api<AdminOrder>(`/api/admin/orders/${no}`);
+      if (detailSeq.current === seq) setDetail(res);
     } catch (e: any) {
+      if (detailSeq.current !== seq) return;
       const message = e.message ?? String(e);
       setDetailError(message);
       toastError(message);
@@ -350,18 +354,22 @@ export default function Orders() {
   }, []);
 
   const closeDrawer = useCallback(() => {
+    ++detailSeq.current;
     setOpenNo(null); setDetail(null); setLinks(null); setTimeline(null); setDetailError("");
     setTab("uebersicht");
   }, []);
 
   const open = useCallback((o: DeskOrder) => {
     if (openNo === o.no) { closeDrawer(); return; }
+    const seq = ++detailSeq.current;
     setOpenNo(o.no); setDetail(null); setDetailError(""); setLinks(null); setTimeline(null);
     setTab("uebersicht");
-    loadDetail(o.no);
-    loadTimeline(o.no);
+    loadDetail(o.no, seq);
+    loadTimeline(o.no, seq);
     if (o.invoice_no && office) {
-      api<Links>(`/api/invoicing/orders/${o.no}/invoice/links`).then(setLinks).catch(() => setLinks(null));
+      api<Links>(`/api/invoicing/orders/${o.no}/invoice/links`)
+        .then((l) => { if (detailSeq.current === seq) setLinks(l); })
+        .catch(() => { if (detailSeq.current === seq) setLinks(null); });
     }
   }, [openNo, office, loadDetail, loadTimeline, closeDrawer]);
 
@@ -378,7 +386,7 @@ export default function Orders() {
     if (openNo !== wanted) open(rows.find((o) => o.no === wanted) ?? ({ no: wanted } as DeskOrder));
   }, [wanted, rows, openNo, open]);
 
-  const refresh = () => { load(q); if (openNo) { loadDetail(openNo); loadTimeline(openNo); } };
+  const refresh = () => { load(q); if (openNo) { const seq = ++detailSeq.current; loadDetail(openNo, seq); loadTimeline(openNo, seq); } };
 
   const release = (no: string) =>
     undoable({

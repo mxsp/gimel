@@ -1,5 +1,5 @@
 import { Button, ButtonGroup, Card, Icon, Tag } from "@blueprintjs/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import type { Floor, Robot, RobotJob, Station } from "../../factory";
 import { navigate } from "../../router";
@@ -136,8 +136,12 @@ export default function FleetVehicles({
     return m;
   }, [jobs]);
 
+  const receivedRef = useRef<{ at: string | null | undefined; ms: number }>({ at: undefined, ms: Date.now() });
+  if (receivedRef.current.at !== sampledAt) {
+    receivedRef.current = { at: sampledAt, ms: Date.now() };
+  }
   const live = useMemo(() => vehicles.map((r) => {
-    const moving = r.active && robotMovingAt(r, sampledAt, now);
+    const moving = r.active && robotMovingAt(r, sampledAt, now, receivedRef.current.ms);
     const fault = r.active && (r.state === "error" || r.state === "blocked");
     const charging = r.active && r.state === "charging";
     const status: Filter = !r.active || r.state === "offline" ? "all" : fault ? "fault" : charging ? "charging" : moving ? "moving" : "waiting";
@@ -179,7 +183,7 @@ export default function FleetVehicles({
     );
   }
 
-  const pose = selected ? robotPoseAt(selected, sampledAt, now) : null;
+  const pose = selected ? robotPoseAt(selected, sampledAt, now, receivedRef.current.ms) : null;
   const selLive = live.find((x) => x.r.id === selectedId);
 
   return (

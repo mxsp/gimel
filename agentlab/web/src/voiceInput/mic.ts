@@ -10,7 +10,7 @@
  *    das Tor (gate.ts) Sprache oder wenigstens Signal über dem Rauschen sah.
  */
 
-import { api, ApiError } from "../api";
+import { api, ApiError, getAgentConfig } from "../api";
 import {
   GateEvent, GateOptions, MicProblem, SpeechGate, meterValue, peakOf, problemFromError, rmsOf,
 } from "./gate";
@@ -344,11 +344,29 @@ export interface VoiceServerInfo {
   tts_backend?: "lokal" | "edge";
 }
 
+let cachedVoiceInfo: VoiceServerInfo | null | undefined;
+let voiceInfoPending: Promise<VoiceServerInfo | null> | null = null;
+
 /** Hat dieser Server eine eigene Spracherkennung? (Portal/Demo: nein, Studio/Labor: ja) */
 export async function voiceServerInfo(): Promise<VoiceServerInfo | null> {
-  try {
-    return await api<VoiceServerInfo>("/api/agent/voice");
-  } catch {
-    return null;
-  }
+  if (cachedVoiceInfo !== undefined) return cachedVoiceInfo;
+  if (voiceInfoPending) return voiceInfoPending;
+  voiceInfoPending = (async () => {
+    try {
+      const cfg = await getAgentConfig();
+      if (cfg.voice_enabled === false) {
+        cachedVoiceInfo = null;
+        return null;
+      }
+      const info = await api<VoiceServerInfo>("/api/agent/voice");
+      cachedVoiceInfo = info;
+      return info;
+    } catch {
+      cachedVoiceInfo = null;
+      return null;
+    } finally {
+      voiceInfoPending = null;
+    }
+  })();
+  return voiceInfoPending;
 }

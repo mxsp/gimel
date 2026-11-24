@@ -313,3 +313,13 @@ def test_the_demo_orders_show_site_and_scope(client):
         assert any(o.route_scope == "received" for o in scoped)
         assert any(o.route_scope.startswith("hall:") for o in scoped)
         assert any(o.route_scope.startswith("floor:") for o in scoped)
+
+
+def test_duplicate_hall_name_rejected_within_same_site(client):
+    s = client.post("/api/factory/sites", json={"name": "Werk Nord"}).json()
+    h1 = client.post("/api/factory/halls", json={"site_id": s["id"], "name": "Halle A"})
+    assert h1.status_code == 200, h1.text
+    dup = client.post("/api/factory/halls", json={"site_id": s["id"], "name": "  halle a "})
+    assert dup.status_code == 409
+    assert client.delete(f"/api/factory/halls/{h1.json()['id']}").status_code == 204
+    assert client.delete(f"/api/factory/sites/{s['id']}").status_code == 204

@@ -1220,22 +1220,20 @@ export default function FloorAdmin({
               im Log, weil ein unsichtbarer Mangel gepflegt wird wie keiner. */}
           {/* Schnellstart-Leiste, wenn noch kein Hallenumriss gezeichnet ist */}
           {(floor.outline?.length ?? 0) < 3 && draft.length < 3 && (
-            <Callout intent="primary" icon="office" style={{ marginBottom: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <div>
-                  <strong>Neue Halle einrichten</strong> — Starten Sie mit dem Hallen-Assistenten (Form, Maße, Gangnetz, Tore &amp; Zonen in einem Schritt) oder zeichnen Sie direkt auf dem Plan.
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Button small intent="primary" icon="office" text="Hallen-Assistent öffnen" onClick={() => setCreatorOpen(true)} />
-                  <Button small icon="widget" text="Rechteck 40 × 24 m setzen" onClick={() => {
+            <Callout compact intent="primary" icon="office" style={{ marginBottom: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <span><strong>Neue Halle einrichten</strong> — Assistent starten oder frei zeichnen.</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <Button small intent="primary" icon="office" text="Hallen-Assistent" onClick={() => setCreatorOpen(true)} />
+                  <Button small icon="widget" text="40 × 24 m" onClick={() => {
                     const pts = templateRect(40, 24);
                     mutate({ outline: pts, aisles: suggestAisles(pts) });
                     setDraft(pts); setDraftClosed(true); setDraftPast([]); setLayer("outline"); setMode("draw");
                   }} />
-                  <Button small icon="polygon-filter" text="Frei zeichnen" onClick={() => {
+                  <Button small icon="polygon-filter" text="Frei" onClick={() => {
                     setLayer("outline"); setMode("draw"); setDraft([]); setDraftClosed(false); setDraftPast([]);
                   }} />
-                  <Button small icon="import" text="DXF importieren" onClick={() => setDxfOpen(true)} />
+                  <Button small icon="import" text="DXF" onClick={() => setDxfOpen(true)} />
                 </div>
               </div>
             </Callout>

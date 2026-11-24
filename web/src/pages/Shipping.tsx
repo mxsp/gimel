@@ -140,9 +140,15 @@ export default function Shipping() {
 
   useEffect(() => { load(shipOffset, shipLimit); }, [shipOffset, shipLimit, load]);
 
+  const detailSeq = useRef(0);
   const openDetail = useCallback(async (no: string) => {
-    try { setDetail({ no, data: await api<ShipmentOrders>(`/api/shipping/${no}/orders`) }); }
-    catch (e: any) { toastError(e.message); }
+    const seq = ++detailSeq.current;
+    try {
+      const data = await api<ShipmentOrders>(`/api/shipping/${no}/orders`);
+      if (detailSeq.current === seq) setDetail({ no, data });
+    } catch (e: any) {
+      if (detailSeq.current === seq) toastError(e.message);
+    }
   }, []);
 
   const openedShip = useRef("");

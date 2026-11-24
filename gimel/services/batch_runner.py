@@ -1,4 +1,4 @@
-﻿"""Der Sammellauf: wartende Positionen einsammeln, gemeinsam schachteln,
+"""Der Sammellauf: wartende Positionen einsammeln, gemeinsam schachteln,
 Innenaufträge mit Plattenzeichnung und Zuordnungstabelle erzeugen.
 
 Ablauf eines Laufs:
@@ -40,6 +40,7 @@ from ..core.kerf import KERF_VERSION
 from ..extensions import active
 from ..core.nesting_gre import engine_label as gre_engine_label
 from ..core.nesting_gre import gre_available
+from ..db import chunked_in as _chunked_in
 from ..models import (AuditLog, BatchPolicy, NestRun, Order, OrderPosition, Product,
                       WorkItem, WorkOrder, WorkOrderStatus, WorkPlate)
 from . import batch_report, run_lock, settings_store
@@ -405,7 +406,57 @@ def _run_batch(db: Session, *, trigger: str, actor: str, force: bool,
                                       options_for=options_resolver(db),
                                       force=force, mixed_formats=mixed,
                                       now=_now(), engine=engine, group_by=grouping)
+    # Lese-Transaktion vor Schreibbeginn schließen, damit SQLite WAL die
+    # zwischenzeitlichen Änderungen anderer Anfragen sieht.
+    if not (db.new or db.dirty or db.deleted):
+        db.commit()
     run = new_run()
+
+    # Unter der Schreibsperre gegen den aktuellen Datenbankstand gegenprüfen:
+    # während plan_batch() kann ein Auftrag storniert, angehalten oder
+    # zurückgezogen worden sein.
+    stale_notes: list[str] = []
+    if groups:
+        all_pos_ids = {
+            pid
+            for g in groups
+            for pid in (
+                *(p.position_id for p in g.parts),
+                *(p.position_id for p in g.oversize),
+                *(item["position_id"] for pl in g.plates for item in pl.placements),
+            )
+        }
+        eligible_ids: set[int] = set()
+        if all_pos_ids:
+            eligible_ids = {
+                pid
+                for (pid,) in (
+                    db.query(OrderPosition.id)
+                    .join(Order, OrderPosition.order_id == Order.id)
+                    .filter(_chunked_in(OrderPosition.id, all_pos_ids))
+                    .filter(OrderPosition.production_status == "pending")
+                    .filter(OrderPosition.kind == "gasket")
+                    .filter(Order.blocked.is_(False))
+                    .filter(Order.released.is_(True))
+                    .filter(Order.held_at.is_(None))
+                    .filter(Order.cancelled_at.is_(None))
+                    .all()
+                )
+            }
+        valid_groups = []
+        for g in groups:
+            g_ids = (
+                {p.position_id for p in g.parts}
+                | {p.position_id for p in g.oversize}
+                | {item["position_id"] for pl in g.plates for item in pl.placements}
+            )
+            if g_ids.issubset(eligible_ids):
+                valid_groups.append(g)
+            else:
+                stale_notes.append(
+                    f"{g.mat} {g.thk:g} mm (Auftrag während Schachtelung geändert)"
+                )
+        groups = valid_groups
 
     # Plattendeckel: eine Bremse, kein Auslöser. Dringendes zuerst, dann die
     # ältere Zusage — was nicht mehr hineinpasst, bleibt ganz liegen. Ganze
@@ -433,11 +484,12 @@ def _run_batch(db: Session, *, trigger: str, actor: str, force: bool,
             pieces = sum(max(1, p.q) for p in g.held)
             notes.append(f"{g.mat} {g.thk:g} mm ({pieces} Teile auf angebrochener Platte "
                          f"sammeln weiter)")
+    notes.extend(stale_notes)
     if notes:
         run.note = "Zurückgestellt: " + " · ".join(notes)
 
     if not groups:
-        run.n_positions = len(pending)
+        run.n_positions = len(pending) if not stale_notes else 0
         run.finished_at = _now()
         db.commit()
         return run
@@ -549,8 +601,6 @@ def _run_batch(db: Session, *, trigger: str, actor: str, force: bool,
                 order_nos.add(item["order_no"])
             n_plates += 1
             n_parts += len(pl.placements)
-
-    from ..db import chunked_in as _chunked_in
 
     if batched_position_ids:
         (db.query(OrderPosition)
@@ -736,43 +786,46 @@ def renest_work_orders(db: Session, *, nos: list[str] | None, actor: str) -> Nes
     Prüfprotokoll, nicht nur im Bauchgefühl des Bedieners. Der Plattenbestand
     geht zurück: gebucht war er für einen Schnitt, der nie stattfand.
     """
-    query = db.query(WorkOrder).filter(WorkOrder.status == WorkOrderStatus.open)
-    if nos:
-        rows = query.filter(WorkOrder.no.in_(nos)).all()
-        missing = set(nos) - {wo.no for wo in rows}
-        if missing:
-            raise RenestError(
-                "Innenauftrag nicht gefunden: " + ", ".join(sorted(missing))
-            )
-    else:
-        rows = query.all()
-    if not rows:
-        raise RenestError("Es gibt keinen offenen Innenauftrag zum Neuschachteln.")
-
     from .work_orders import cancel_work_order
 
-    position_ids: set[int] = set()
-    for wo in rows:
-        result = cancel_work_order(
-            db, wo, actor=actor, reason="neu geschachtelt", commit=False
-        )
-        position_ids.update(result["position_ids"])
-        db.add(AuditLog(actor=actor, action="work_order_renest", entity="work_order",
-                        entity_id=wo.no,
-                        detail={"positions": len(result["position_ids"]),
-                                "plates": wo.n_plates}))
-    if not position_ids:
-        raise RenestError(
-            "Die gewählten Innenaufträge enthalten keine Positionen — "
-            "es gibt nichts neu zu schachteln."
-        )
-    db.commit()
+    with _run_lock:
+        with run_lock.hold("batch"):
+            query = db.query(WorkOrder).filter(WorkOrder.status == WorkOrderStatus.open)
+            if nos:
+                rows = query.filter(WorkOrder.no.in_(nos)).all()
+                missing = set(nos) - {wo.no for wo in rows}
+                if missing:
+                    raise RenestError(
+                        "Innenauftrag nicht gefunden: " + ", ".join(sorted(missing))
+                    )
+            else:
+                rows = query.all()
+            if not rows:
+                raise RenestError("Es gibt keinen offenen Innenauftrag zum Neuschachteln.")
 
-    # Nur die zurückgestellten Positionen gehen in den neuen Lauf. Ein
-    # ``force=True`` über alle Eimer würde fremde, noch sammelnde Aufträge
-    # mitreißen — genau das war der Fehler.
-    run = run_batch(db, trigger="renest", actor=actor, force=True,
-                    only_positions=position_ids)
+            position_ids: set[int] = set()
+            for wo in rows:
+                result = cancel_work_order(
+                    db, wo, actor=actor, reason="neu geschachtelt", commit=False
+                )
+                position_ids.update(result["position_ids"])
+                db.add(AuditLog(actor=actor, action="work_order_renest", entity="work_order",
+                                entity_id=wo.no,
+                                detail={"positions": len(result["position_ids"]),
+                                        "plates": wo.n_plates}))
+            if not position_ids:
+                db.rollback()
+                raise RenestError(
+                    "Die gewählten Innenaufträge enthalten keine Positionen — "
+                    "es gibt nichts neu zu schachteln."
+                )
+            db.commit()
+
+            # Nur die zurückgestellten Positionen gehen in den neuen Lauf. Ein
+            # ``force=True`` über alle Eimer würde fremde, noch sammelnde Aufträge
+            # mitreißen — genau das war der Fehler.
+            run = _run_batch(db, trigger="renest", actor=actor, force=True,
+                             only_positions=position_ids)
     try:
         from .worklist import reconcile
         reconcile(db, who=actor)

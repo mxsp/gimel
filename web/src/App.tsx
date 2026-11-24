@@ -66,6 +66,18 @@ export default function App() {
   const version = useVersion();
   const [help, setHelp] = useState(false);
   const [systemInfoOpen, setSystemInfoOpen] = useState(false);
+
+  useEffect(() => {
+    if (!systemInfoOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        e.preventDefault();
+        setSystemInfoOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [systemInfoOpen]);
   // Das PIN-Konto bleibt in der Datenbank staff, arbeitet aber als Admin (Beschluss 2026-11-02).
   const role = session ? (canAdminWork(session) ? "admin" : session.role) : "";
   const showHelp = useCallback(() => setHelp(true), []);
@@ -166,9 +178,11 @@ export default function App() {
       <Dialog
         isOpen={systemInfoOpen}
         onClose={() => setSystemInfoOpen(false)}
+        canEscapeKeyClose
         title="Gimel Einstellungen & System-Info"
         icon="info-sign"
         style={{ width: "min(760px, 94vw)" }}
+        onOpened={(el) => el.querySelector<HTMLElement>("button, input, select, [tabindex]")?.focus()}
       >
         <DialogBody>
           <SystemSettingsPanel

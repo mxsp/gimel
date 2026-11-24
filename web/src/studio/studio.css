@@ -201,6 +201,11 @@ body.studio-body { margin: 0; background: var(--g-bg); color: var(--g-text); ove
   .studio-brand b { display: none; }
   .studio-floor select { max-width: 155px; }
 }
+@media (max-width: 1280px) and (min-width: 901px) {
+  .studio-layer-btn .bp5-button-text,
+  .studio-tools .bp5-popover-target .bp5-button-text { display: none; }
+  .studio-seg .bp5-button { padding: 4px 8px; }
+}
 .studio-hint > span { min-width: 0; }
 .studio-scrim { position: fixed; inset: 0; z-index: 19; border: 0; padding: 0; background: rgba(0, 0, 0, 0.32); cursor: pointer; }
 

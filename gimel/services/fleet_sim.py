@@ -20,7 +20,7 @@ from ..core import fleet_sim as core
 from ..core.layout import Layout
 from ..core.route_improve import safe_leg
 from ..models import FactoryFloor, FactoryStation, RobotAsset, WorkOrder, WorkOrderStatus
-from .robot_ways import floor_id_of_station, station_bodies
+from .robot_ways import _first_floor_id, floor_id_of_station, station_bodies
 
 #: Arbeitstage, aus denen die Tagesmenge geschätzt wird.
 WINDOW_DAYS = 14
@@ -41,8 +41,17 @@ def _floor(db: Session, floor_id: Optional[int]) -> FactoryFloor:
 
 
 def _stations_on(db: Session, floor_id: int) -> list[FactoryStation]:
+    default_floor_id = _first_floor_id(db)
     return [s for s in db.query(FactoryStation).filter(FactoryStation.active.is_(True)).all()
-            if floor_id_of_station(db, s) == floor_id]
+            if floor_id_of_station(db, s, default_floor_id=default_floor_id) == floor_id]
+
+
+def _robots_on(db: Session, floor_id: int) -> list[RobotAsset]:
+    default_floor_id = _first_floor_id(db)
+    return [
+        r for r in db.query(RobotAsset).filter(RobotAsset.active.is_(True)).all()
+        if (r.floor_id if r.floor_id is not None else default_floor_id) == floor_id
+    ]
 
 
 def _home(floor: FactoryFloor, stations: list[FactoryStation]) -> tuple[float, float]:
@@ -132,8 +141,7 @@ def defaults(db: Session, floor_id: Optional[int], *, now: Optional[datetime] = 
     else:
         estimate = min(120, total_edges)
         basis = "kein Innenauftrag in den letzten 14 Tagen — Menge aus dem gezählten Fluss"
-    existing = [r for r in db.query(RobotAsset).filter(RobotAsset.active.is_(True)).all()
-                if r.floor_id == floor.id]
+    existing = _robots_on(db, floor.id)
     home = _home(floor, stations)
     return {
         "floor_id": floor.id,
@@ -192,9 +200,7 @@ def run(db: Session, floor_id: Optional[int], params: dict) -> dict:
                 handling_s=float(params.get("handling_s", 60)), planned=True))
     base: list[core.SimRobot] = []
     if params.get("include_existing"):
-        for r in db.query(RobotAsset).filter(RobotAsset.active.is_(True)).all():
-            if r.floor_id != floor.id:
-                continue
+        for r in _robots_on(db, floor.id):
             base.append(core.SimRobot(
                 id=f"r{r.id}", name=r.name, kind=r.kind, speed_m_s=float(r.speed_m_s or 0.8),
                 start=_robot_start(r, home), handling_s=float(params.get("handling_s", 60)), planned=False))

@@ -805,7 +805,7 @@ a { color: var(--lab-accent-ink); }
   border-bottom: 1px solid var(--lab-line);
   background: color-mix(in srgb, var(--lab-panel) 55%, var(--lab-bg));
   flex-shrink: 0;
-  overflow-x: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
 }
 .lab-tabs::-webkit-scrollbar { height: 4px; }

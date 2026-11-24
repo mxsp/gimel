@@ -28,7 +28,7 @@ from typing import Iterable, Optional, Sequence
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..core.layout import Layout
+from ..core.layout import Layout, Route
 from ..core.routing import (
     Assessment,
     HandlerAssessment,
@@ -728,20 +728,22 @@ def material_flow(db: Session, *, limit: int = 300) -> list[dict]:
 
     Gezählt wird, was zugeordnet ist, nicht was gedacht war: eine Kante
     entsteht erst, wenn ein Innenauftrag wirklich auf einer Station liegt.
-    Der Weg ist die Strecke aus dem Gangnetz — dieselbe Zahl, die auch in die
-    Zuordnung eingeht, damit der Pfeil im Plan und der Faktor in der
-    Begründung nicht auseinanderlaufen.
+    Der Weg nutzt ``RoutingContext.route_between`` über Ebenen und verankerte
+    Hallen hinweg — dieselbe Rechnung wie in der Zuordnung.
     """
     stations = db.query(FactoryStation).all()
-    by_id = {s.id: s for s in stations}
-    stores = [s for s in stations if s.is_storage and s.active]
-    ships = [
-        s
-        for s in stations
-        if (s.type.value if hasattr(s.type, "value") else s.type) == "shipping"
-        and s.active
-    ]
-    layout = layout_of(db)
+    specs = {s.id: s for s in station_specs(db, stations)}
+    stores = [s for s in specs.values() if s.is_storage and s.active]
+    ships = [s for s in specs.values() if s.type == "shipping" and s.active]
+    ctx = context(db)
+    route_cache: dict[tuple[int, int], Optional[Route]] = {}
+
+    def route_of(a: int, b: int) -> Optional[Route]:
+        key = (a, b)
+        if key not in route_cache:
+            sa, sb = specs.get(a), specs.get(b)
+            route_cache[key] = ctx.route_between(sa, sb) if (sa and sb) else None
+        return route_cache[key]
 
     rows = (
         db.query(WorkOrder)
@@ -754,19 +756,19 @@ def material_flow(db: Session, *, limit: int = 300) -> list[dict]:
     edges: dict[tuple[int, int], dict] = {}
 
     def add(a: int, b: int, kind: str, mat: str) -> None:
-        if a == b or a not in by_id or b not in by_id:
+        if a == b or a not in specs or b not in specs:
             return
         key = (a, b)
         e = edges.get(key)
         if not e:
-            r = layout.route((by_id[a].x, by_id[a].y), (by_id[b].x, by_id[b].y))
+            r = route_of(a, b)
             e = edges[key] = {
                 "from": a,
                 "to": b,
                 "kind": kind,
                 "count": 0,
-                "metres": round(r.metres, 1),
-                "exact": r.exact,
+                "metres": round(r.metres, 1) if r is not None else 0.0,
+                "exact": bool(r and r.exact),
                 "materials": set(),
             }
         e["count"] += 1
@@ -775,24 +777,16 @@ def material_flow(db: Session, *, limit: int = 300) -> list[dict]:
 
     for wo in rows:
         sid = int(wo.station_id)  # type: ignore[arg-type]
+        if sid not in specs:
+            continue
         pool = [s for s in stores if not s.materials or wo.mat in s.materials] or stores
-        if pool:
-            nearest = min(
-                pool,
-                key=lambda s: (
-                    layout.route((s.x, s.y), (by_id[sid].x, by_id[sid].y)).metres
-                    if sid in by_id
-                    else 0.0
-                ),
-            )
+        reachable_stores = [(r.metres, s) for s in pool if (r := route_of(s.id, sid)) is not None]
+        if reachable_stores:
+            _, nearest = min(reachable_stores, key=lambda item: (item[0], item[1].id))
             add(nearest.id, sid, "supply", wo.mat)
-        if ships and sid in by_id:
-            nearest = min(
-                ships,
-                key=lambda s: (
-                    layout.route((by_id[sid].x, by_id[sid].y), (s.x, s.y)).metres
-                ),
-            )
+        reachable_ships = [(r.metres, s) for s in ships if (r := route_of(sid, s.id)) is not None]
+        if reachable_ships:
+            _, nearest = min(reachable_ships, key=lambda item: (item[0], item[1].id))
             add(sid, nearest.id, "dispatch", wo.mat)
 
     return [

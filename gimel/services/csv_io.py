@@ -290,6 +290,13 @@ def plan_import(db: Session, raw: bytes) -> ImportPlan:
 
 def commit_import(db: Session, plan: ImportPlan, actor: str, filename: str) -> list[str]:
     """Alles oder nichts: erst der eine Commit am Ende macht die Aufträge sichtbar."""
+    # Passwort-Hashing (bcrypt) vor der Schreibtransaktion erledigen, damit
+    # SQLite währenddessen nicht blockiert bleibt.
+    prehashed: dict[str, str] = {}
+    for group in plan.orders:
+        if group.customer is None and group.email not in prehashed:
+            prehashed[group.email] = hash_password(secrets.token_urlsafe(24))
+
     new: dict[str, User] = {}
     created: list[str] = []
     try:
@@ -297,7 +304,7 @@ def commit_import(db: Session, plan: ImportPlan, actor: str, filename: str) -> l
             customer = group.customer or new.get(group.email)
             if customer is None:
                 customer = User(email=group.email, company=group.company, role=Role.customer,
-                                password_hash=hash_password(secrets.token_urlsafe(24)))
+                                password_hash=prehashed[group.email])
                 db.add(customer)
                 db.flush()
                 new[group.email] = customer

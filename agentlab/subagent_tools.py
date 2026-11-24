@@ -288,7 +288,7 @@ def wait_for_subagent_results(ctx: ToolContext, args: dict) -> dict:
     timeout = float(args.get("timeout_s") or 90)
     from .subagent_runner import wait_for_subagents
 
-    rows = wait_for_subagents(chat.id, timeout_s=timeout)
+    rows, timed_out = wait_for_subagents(chat.id, timeout_s=timeout)
     results = []
     purged = 0
     for r in rows:
@@ -304,11 +304,17 @@ def wait_for_subagent_results(ctx: ToolContext, args: dict) -> dict:
             purge_subagent(ctx.db, r)
             purged += 1
     ctx.db.commit()
+    note = (
+        "Zeitlimit beim Warten auf Subagenten erreicht; mindestens ein Subagent läuft noch."
+        if timed_out
+        else "Fasse alle Ergebnisse zusammen. Erledigte temporäre Subagenten wurden bereits automatisch gelöscht."
+    )
     return {
         "ok": True, "chat_id": chat.id, "count": len(results),
         "purged": purged,
+        "timed_out": timed_out,
         "results": results,
-        "note": "Fasse alle Ergebnisse zusammen. Erledigte temporäre Subagenten wurden bereits automatisch gelöscht.",
+        "note": note,
     }
 
 
@@ -323,24 +329,24 @@ SUBAGENT_SPECS: list[ToolSpec] = [
             "capabilities": {"type": "array", "items": {"type": "string"}},
             "model": {"type": "string"},
         }, ["name", "task"]),
-        dispatch_subagent, roles=frozenset(ALL), reversible=True,
+        dispatch_subagent, roles=frozenset(ALL), reversible=True, orchestrator_only=True,
     ),
     ToolSpec(
         "list_subagents",
         "Listet alle temporären Subagenten dieses einen Orchestrator-Chats mit Aufgabe, Fähigkeiten und Verwendung.",
         _schema({}, []),
-        list_subagents, roles=frozenset(ALL), reversible=True,
+        list_subagents, roles=frozenset(ALL), reversible=True, orchestrator_only=True,
     ),
     ToolSpec(
         "wait_for_subagents",
         "Wartet, bis alle temporären Subagenten fertig sind, und liefert ihre Ergebnisse. Vor der Gesamtantwort aufrufen.",
         _schema({"timeout_s": {"type": "number"}}, []),
-        wait_for_subagent_results, roles=frozenset(ALL), reversible=True,
+        wait_for_subagent_results, roles=frozenset(ALL), reversible=True, orchestrator_only=True,
     ),
     ToolSpec(
         "dispose_subagent",
         "Entsorgt einen temporären Subagenten nach Gebrauch — der Chat bleibt bestehen.",
         _schema({"subagent_id": {"type": "integer"}}, ["subagent_id"]),
-        dispose_subagent, roles=frozenset(ALL), reversible=True,
+        dispose_subagent, roles=frozenset(ALL), reversible=True, orchestrator_only=True,
     ),
 ]

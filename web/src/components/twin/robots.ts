@@ -98,29 +98,36 @@ export function planMoving(plan: SimPlan, t: number): boolean {
   return false;
 }
 
-/** Zeit für die Simulation: höchstens zwei Minuten über den letzten Abruf hinaus. */
-function simClock(sampledAt: string | null | undefined, nowMs: number): number {
+/** Zeit für die Simulation: höchstens zwei Minuten über den letzten Abruf hinaus.
+ *  Mit ``receivedAtMs`` (lokaler Empfangszeitpunkt) bleibt die Wiedergabe auch bei
+ *  abweichender Systemuhr des Clients synchron zur Serverzeit ``sampledAt``. */
+function simClock(sampledAt: string | null | undefined, nowMs: number, receivedAtMs?: number): number {
   const stamp = sampledAt ? Date.parse(sampledAt) : NaN;
+  if (Number.isFinite(stamp) && receivedAtMs != null && Number.isFinite(receivedAtMs)) {
+    const elapsed = Math.max(0, Math.min(120_000, nowMs - receivedAtMs));
+    return stamp + elapsed;
+  }
   return Number.isFinite(stamp) ? Math.min(nowMs, stamp + 120_000) : nowMs;
 }
 
 /** Fährt ein Roboter jetzt? Mit Fahrplan aus dem Plan, sonst nach seinem Zustand. */
-export function robotMovingAt(robot: Robot, sampledAt: string | null | undefined, nowMs: number): boolean {
+export function robotMovingAt(robot: Robot, sampledAt: string | null | undefined, nowMs: number, receivedAtMs?: number): boolean {
   const plan = robot.simulated ? robot.sim_plan : null;
-  if (plan) return planMoving(plan, (simClock(sampledAt, nowMs) - Date.parse(plan.epoch)) / 1000);
+  if (plan) return planMoving(plan, (simClock(sampledAt, nowMs, receivedAtMs) - Date.parse(plan.epoch)) / 1000);
   return robot.state === "moving";
 }
 
-export function robotPoseAt(robot: Robot, sampledAt: string | null | undefined, nowMs: number): RobotPose | null {
+export function robotPoseAt(robot: Robot, sampledAt: string | null | undefined, nowMs: number, receivedAtMs?: number): RobotPose | null {
   const plan = robot.simulated ? robot.sim_plan : null;
   if (plan && Array.isArray(robot.route) && robot.route.length >= 2 && Number.isFinite(Date.parse(plan.epoch))) {
     // Derselbe Fahrplan wie auf dem Server: Vorfahrt, Warten an sicheren Halten.
-    const t = (simClock(sampledAt, nowMs) - Date.parse(plan.epoch)) / 1000;
+    const t = (simClock(sampledAt, nowMs, receivedAtMs) - Date.parse(plan.epoch)) / 1000;
     return pathPose(robot.route, planDistance(plan, t), robot.route_mode === "loop");
   }
   if (robot.simulated && Array.isArray(robot.route) && robot.route.length >= 2) {
     const stamp = sampledAt ? Date.parse(sampledAt) : NaN;
-    const elapsed = Number.isFinite(stamp) ? Math.max(0, (nowMs - stamp) / 1000) : 0;
+    const anchor = receivedAtMs != null && Number.isFinite(receivedAtMs) ? receivedAtMs : stamp;
+    const elapsed = Number.isFinite(anchor) ? Math.max(0, (nowMs - anchor) / 1000) : 0;
     // Nicht endlos extrapolieren: nach zwei Minuten ohne neue Meldung bleibt
     // der letzte Stand stehen, statt eine Position zu erfinden.
     const safeElapsed = Math.min(120, elapsed);

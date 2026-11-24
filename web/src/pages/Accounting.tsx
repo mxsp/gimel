@@ -4,6 +4,7 @@ import { Button, Dialog, DialogBody, DialogFooter, HTMLSelect, HTMLTable, InputG
 import KeyPopover from "../ui/KeyPopover";
 import NonIdealState from "../components/NonIdealState";
 import Callout from "../components/Callout";
+import { SectionError } from "../components/PageStates";
 import { useCallback, useEffect, useState } from "react";
 import { api, apiDownload, apiWithCount, canAdminWork, fmtDate, fmtEur, getUser } from "../api";
 import { useHashRoute } from "../router";
@@ -174,6 +175,7 @@ export default function Accounting() {
   const [invOffset, setInvOffset] = useState(0);
   const [invLimit, setInvLimit] = useState(100);
   const [invLoading, setInvLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [summary, setSummary] = useState<{
     total: number; open_count: number; overdue_count: number; paid_count: number;
     open_sum: number; overdue_sum: number; paid_30d_sum: number;
@@ -194,7 +196,12 @@ export default function Accounting() {
       // Interne und stornierte Aufträge werden nie berechnet — sie gehören nicht
       // in die offenen Forderungen.
       setOpen(openRes.filter((o) => o.kind !== "internal" && !o.cancelled_at && !o.paid && !o.invoice_no));
-    } catch (e: any) { toastError(e.message); } finally { setInvLoading(false); }
+      setLoadError("");
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setLoadError(msg);
+      toastError(msg);
+    } finally { setInvLoading(false); }
   }, [invOffset, invLimit]);
   useEffect(() => { load(invOffset, invLimit); }, [invOffset, invLimit, load]);
   useEffect(() => {
@@ -459,7 +466,7 @@ export default function Accounting() {
         {filter !== "alle" && <FilterTag label={filterLabel} onRemove={() => setFilter("alle")} />}
       </Toolbar>
 
-      {!rows ? <Spinner size={30} /> : shown.length === 0 ? (
+      {loadError && !rows ? <SectionError message={loadError} onRetry={() => load()} /> : !rows ? <Spinner size={30} /> : shown.length === 0 ? (
         <NonIdealState icon="euro"
                        title={all.length ? "Nichts im Filter" : "Keine Rechnungen"}
                        description={all.length

@@ -8,6 +8,7 @@ native Schnittstellen für Anthropic Claude und Google Gemini.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -631,6 +632,19 @@ def cache_is_fresh(provider: AgentProvider) -> bool:
     return fetched > datetime.now(timezone.utc) - timedelta(minutes=MODEL_CACHE_MINUTES)
 
 
+def _is_local_or_lan_url(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").strip().lower().strip("[]")
+    if not host:
+        return False
+    if host in ("localhost", "localhost.localdomain") or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        return False
+
+
 async def fetch_models(
     db: Session, provider: AgentProvider, *, force: bool = False
 ) -> tuple[list[dict], str]:
@@ -651,6 +665,9 @@ async def fetch_models(
             provider.default_model = provider.default_model or models[0]["id"]
             db.commit()
             return models, reason
+        default_id = (provider.default_model or "").strip()
+        if default_id:
+            return [{"id": default_id}], reason
         return None
 
     if kind in ("perplexity", "azure-openai") and not provider.models_url.strip():
@@ -664,9 +681,11 @@ async def fetch_models(
         if provider.default_model:
             return [{"id": provider.default_model}], ""
 
+    local_lan = _is_local_or_lan_url(url) or is_ollama(provider)
+    timeout = httpx.Timeout(6.0, connect=2.5) if local_lan else httpx.Timeout(12.0, connect=5.0)
     try:
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(15.0, connect=8.0),
+            timeout=timeout,
             follow_redirects=False,
             headers=_request_headers(provider),
         ) as client:
@@ -680,13 +699,14 @@ async def fetch_models(
         models = _parse_models(payload, kind=kind)
         if not models:
             raise ProviderError("Der Endpunkt lieferte keine Modelle.", 502)
-    except ProviderError:
-        raise
     except Exception as exc:  # noqa: BLE001
-        fb = _use_fallback(f"Modellliste nicht erreichbar: {exc}")
+        reason = exc.detail if isinstance(exc, ProviderError) else f"Modellliste nicht erreichbar: {exc}"
+        fb = _use_fallback(reason)
         if fb is not None:
             return fb
-        raise ProviderError(f"Modellliste nicht erreichbar: {exc}", 502) from exc
+        if isinstance(exc, ProviderError):
+            raise
+        raise ProviderError(reason, 502) from exc
     provider.models_cache = models
     provider.models_fetched_at = datetime.now(timezone.utc)
     if not provider.default_model:

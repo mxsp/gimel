@@ -22,6 +22,7 @@ import re
 import resource
 import secrets
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -1100,7 +1101,12 @@ def _exec_in_docker(
     return rc, stdout, stderr, timed_out
 
 
-def _bwrap_preexec(timeout_s: int, max_fsize_bytes: int) -> Any:
+def _bwrap_preexec(
+    timeout_s: int,
+    max_fsize_bytes: int,
+    memory_mb: int = 512,
+    pids_limit: int = MAX_PIDS,
+) -> Any:
     def _apply() -> None:
         try:
             cpu = max(5, timeout_s + 2)
@@ -1109,6 +1115,22 @@ def _bwrap_preexec(timeout_s: int, max_fsize_bytes: int) -> Any:
             pass
         try:
             resource.setrlimit(resource.RLIMIT_FSIZE, (max_fsize_bytes, max_fsize_bytes))
+        except (ValueError, OSError):
+            pass
+        try:
+            as_bytes = max(1024, int(memory_mb) * 2) * 1024 * 1024
+            soft_as, hard_as = resource.getrlimit(resource.RLIMIT_AS)
+            limit_as = min(as_bytes, hard_as) if hard_as > 0 else as_bytes
+            if soft_as <= 0 or limit_as < soft_as:
+                resource.setrlimit(resource.RLIMIT_AS, (limit_as, limit_as))
+        except (ValueError, OSError):
+            pass
+        try:
+            # RLIMIT_NPROC zählt auf Linux pro realer UID (inkl. Host-Threads); daher nur sanfte Obergrenze über aktuellem Stand.
+            soft_np, hard_np = resource.getrlimit(resource.RLIMIT_NPROC)
+            cap_np = max(4096, int(pids_limit) * 16)
+            if (hard_np <= 0 or cap_np < hard_np) and (soft_np <= 0 or cap_np < soft_np):
+                resource.setrlimit(resource.RLIMIT_NPROC, (cap_np, cap_np))
         except (ValueError, OSError):
             pass
     return _apply
@@ -1173,7 +1195,9 @@ def _exec_in_bwrap(
             text=True,
             timeout=timeout_s,
             check=False,
-            preexec_fn=_bwrap_preexec(timeout_s, max_fsize),
+            preexec_fn=_bwrap_preexec(
+                timeout_s, max_fsize, memory_mb=session.memory_mb, pids_limit=session.pids_limit,
+            ),
         )
         rc = proc.returncode
         stdout = proc.stdout or ""
@@ -1273,7 +1297,13 @@ def write_workspace_file(
                 f"Speicherlimit der temporären Umgebung ({session.workspace_mb} MB) erreicht."
             )
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(raw_bytes)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(target, flags, 0o644)
+        except OSError as exc:
+            raise SandboxError(f"Datei „{path}“ konnte nicht sicher geschrieben werden: {exc}") from exc
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw_bytes)
         session.last_used_at = _now()
         rel = target.relative_to(session.workspace_dir.resolve()).as_posix()
     return {
@@ -1297,12 +1327,21 @@ def read_workspace_file(
     limit = max(500, min(int(max_chars or 40_000), 400_000))
     with session.lock:
         target = _resolve_workspace_path(session.workspace_dir, path, allow_root=False)
-        if not target.exists() or not target.is_file():
-            raise SandboxError(f"Datei „{path}“ im Container nicht gefunden.", status=404)
         if target.is_symlink():
             raise SandboxError("Symlinks können nicht direkt gelesen werden.", status=422)
-        size = target.stat().st_size
-        raw = target.read_bytes()
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(target, flags)
+        except FileNotFoundError as exc:
+            raise SandboxError(f"Datei „{path}“ im Container nicht gefunden.", status=404) from exc
+        except OSError as exc:
+            raise SandboxError("Symlinks oder Sonderdateien können nicht direkt gelesen werden.", status=422) from exc
+        with os.fdopen(fd, "rb") as handle:
+            st = os.fstat(handle.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                raise SandboxError(f"Datei „{path}“ ist keine reguläre Datei.", status=422)
+            size = st.st_size
+            raw = handle.read()
         session.last_used_at = _now()
         rel = target.relative_to(session.workspace_dir.resolve()).as_posix()
     text = raw.decode("utf-8", errors="replace")

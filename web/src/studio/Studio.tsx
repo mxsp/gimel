@@ -10,7 +10,8 @@ import GimelMark from "../components/GimelMark";
 import AppSwitcher from "../components/AppSwitcher";
 import BotSmiley from "../components/BotSmiley";
 import SidebarUpdateButton from "../components/SidebarUpdateButton";
-import ThemeSwitch from "../components/ThemeSwitch";
+import ThemeSwitch, { THEME_EVENT } from "../components/ThemeSwitch";
+import { cycleMode } from "../theme";
 import FloorPlan from "../components/FloorPlan";
 import HallCreatorDialog from "../components/HallCreatorDialog";
 import IsoFloorPlan from "../components/twin/IsoFloorPlan";
@@ -36,7 +37,7 @@ import { usePageContext, usePageProbe } from "@agentlab/pageContext";
 import CopilotDock from "../components/agent/CopilotDock";
 import { useCopilotDock } from "../components/agent/copilotState";
 import { twinPart, viewerProbe } from "../components/agent/twinContext";
-import { floorLabel, stationFloor, useTopology } from "../sites";
+import { allFloors, floorLabel, stationFloor, useTopology } from "../sites";
 
 /* Twin Studio — der Zwilling als eigene Anwendung.
 
@@ -126,6 +127,7 @@ function useStageHeight(): [(el: HTMLDivElement | null) => void, number] {
 }
 
 const NARROW = "(max-width: 900px)";
+const COMPACT_BAR = "(max-width: 1280px)";
 const clock = (d: Date) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 
 export default function Studio({ user, demo, agent = false, onLogout }: { user: SessionUser; demo: boolean; agent?: boolean; onLogout: () => void }) {
@@ -264,9 +266,16 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
   const staged = stagedPref === "" ? demo : stagedPref === "1";
   /** Schmal (Telefon): Aufbau und Station liegen als Schublade über der Bühne. */
   const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
+  const [compactBar, setCompactBar] = useState(() => window.matchMedia(COMPACT_BAR).matches);
   useEffect(() => {
     const media = window.matchMedia(NARROW);
     const update = () => setNarrow(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    const media = window.matchMedia(COMPACT_BAR);
+    const update = () => setCompactBar(media.matches);
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
@@ -790,54 +799,56 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
   };
 
   // Tastatur: Ansichten 1/2/3, G begehen, M messen, T Rundgang, P Foto, F Vollbild, Esc.
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyHandlerRef.current = (e: KeyboardEvent) => {
+    const t = e.target as HTMLElement | null;
+    if (e.defaultPrevented) return;
+    // Häkchen und Schalter nehmen keine Buchstaben an: nach einem Klick darauf
+    // sollen G, H, M … weiter wirken (bis 2026-11-07 schluckte der Fokus sie).
+    const toggleInput = t instanceof HTMLInputElement && /^(checkbox|radio)$/.test(t.type);
+    if (t && !toggleInput && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.closest?.(".copilot-dock"))) return;
+    // In einem Dialog oder Menü gehört Esc dem Overlay.
+    if (t?.closest?.(".bp5-overlay") || document.querySelector(".bp5-overlay-open .bp5-dialog")) return;
+    // Lagen aus dem Begehen zurücknehmen — mehrteilig, also auch bei
+    // abgeschalteten Einbuchstaben-Kürzeln (WCAG 2.1.4).
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      if (e.code === "KeyZ") {
+        e.preventDefault();
+        if (e.shiftKey) void redoMove(); else void undoMove();
+        return;
+      }
+      if (e.code === "KeyY") { e.preventDefault(); void redoMove(); return; }
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Escape") {
+      if (narrow && leftOpen) setLeftOpen(false);
+      else if (kiosk) setKiosk(false);
+      else if (touring) setTouring(false);
+      else if (selectedId != null && !walk && !measure) setSelectedId(null);
+      return;
+    }
+    if (!keysOn) return;
+    if (walk && /^(KeyW|KeyA|KeyS|KeyD)$/.test(e.code)) return;
+    if (e.key === "1" && gl !== false) switchView("three");
+    else if (e.key === "2") switchView("iso");
+    else if (e.key === "3") switchView("2d");
+    else if (e.key === "4" && admin) switchView("edit");
+    else if (e.key === "g" && can3d) startWalk(!walk);
+    else if (e.key === "m" && can3d) startMeasure(!measure);
+    else if (e.key === "t" && can3d) startTour(!touring);
+    else if (e.key === "p" && can3d) screenshot();
+    else if (e.key === "f") toggleFullscreen();
+    else if (e.key === "k" && view === "three") toggle("minimap");
+    else if (touring && e.key === "ArrowRight") threeRef.current?.tourStep(1);
+    else if (touring && e.key === "ArrowLeft") threeRef.current?.tourStep(-1);
+    else if (touring && e.key === " ") { e.preventDefault(); const next = !tourPaused; setTourPaused(next); threeRef.current?.tourPause(next); }
+  };
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (e.defaultPrevented) return;
-      // Häkchen und Schalter nehmen keine Buchstaben an: nach einem Klick darauf
-      // sollen G, H, M … weiter wirken (bis 2026-11-07 schluckte der Fokus sie).
-      const toggleInput = t instanceof HTMLInputElement && /^(checkbox|radio)$/.test(t.type);
-      if (t && !toggleInput && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.closest?.(".copilot-dock"))) return;
-      // In einem Dialog oder Menü gehört Esc dem Overlay.
-      if (t?.closest?.(".bp5-overlay") || document.querySelector(".bp5-overlay-open .bp5-dialog")) return;
-      // Lagen aus dem Begehen zurücknehmen — mehrteilig, also auch bei
-      // abgeschalteten Einbuchstaben-Kürzeln (WCAG 2.1.4).
-      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-        if (e.code === "KeyZ") {
-          e.preventDefault();
-          if (e.shiftKey) void redoMove(); else void undoMove();
-          return;
-        }
-        if (e.code === "KeyY") { e.preventDefault(); void redoMove(); return; }
-        return;
-      }
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "Escape") {
-        if (narrow && leftOpen) setLeftOpen(false);
-        else if (kiosk) setKiosk(false);
-        else if (touring) setTouring(false);
-        else if (selectedId != null && !walk && !measure) setSelectedId(null);
-        return;
-      }
-      if (!keysOn) return;
-      if (walk && /^(KeyW|KeyA|KeyS|KeyD)$/.test(e.code)) return;
-      if (e.key === "1" && gl !== false) switchView("three");
-      else if (e.key === "2") switchView("iso");
-      else if (e.key === "3") switchView("2d");
-      else if (e.key === "4" && admin) switchView("edit");
-      else if (e.key === "g" && can3d) startWalk(!walk);
-      else if (e.key === "m" && can3d) startMeasure(!measure);
-      else if (e.key === "t" && can3d) startTour(!touring);
-      else if (e.key === "p" && can3d) screenshot();
-      else if (e.key === "f") toggleFullscreen();
-      else if (e.key === "k" && view === "three") toggle("minimap");
-      else if (touring && e.key === "ArrowRight") threeRef.current?.tourStep(1);
-      else if (touring && e.key === "ArrowLeft") threeRef.current?.tourStep(-1);
-      else if (touring && e.key === " ") { e.preventDefault(); const next = !tourPaused; setTourPaused(next); threeRef.current?.tourPause(next); }
-    };
+    const onKey = (e: KeyboardEvent) => keyHandlerRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
   const forecast = step !== 0;
   const stepLabel = STEPS.find((s) => s.id === step)?.label ?? "Jetzt";
@@ -1011,7 +1022,7 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
             title="Aufbau ein-/ausblenden" onClick={() => setLeftOpen((v) => !v)} />
           <span className="studio-brand"><GimelMark size={22} /> <b>Twin Studio</b></span>
           <FloorPicker topo={topo} floorId={floorId} onPick={setFloorId} />
-          {admin && (
+          {admin && !compactBar && (
             <Button
               small
               minimal
@@ -1031,7 +1042,7 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
                 onClick={() => switchView("edit")} title="Halle bearbeiten: Umriss, Zonen, Hindernisse, Gänge, Tore, Stationen (4)" />
             )}
           </ButtonGroup>
-          {can3d && (
+          {can3d && !compactBar && (
             <ButtonGroup className="studio-seg studio-quality" aria-label="Darstellung">
               <Button text="Schnell" active={quality === "schnell"} aria-pressed={quality === "schnell"} onClick={() => setQuality("schnell")}
                 title="Flach und sparsam — läuft überall" />
@@ -1040,7 +1051,7 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
             </ButtonGroup>
           )}
           <KeyPopover content={layerMenu} placement="bottom-start">
-            <Button icon="layers" text="Ebenen & Daten" aria-label="Ebenen und Daten" rightIcon="caret-down" />
+            <Button className="studio-layer-btn" icon="layers" text="Ebenen & Daten" aria-label="Ebenen und Daten" rightIcon="caret-down" />
           </KeyPopover>
           <span className="studio-bar-gap" />
           {(view === "three" || gl === false) && (
@@ -1061,21 +1072,46 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
                 <Button icon="camera" text="Ansichten" aria-label="Ansichten" rightIcon="caret-down" disabled={!can3d}
                   title={can3d ? "Gespeicherte Kamera-Ansichten" : "Nur in 3D"} />
               </KeyPopover>
-              <Button icon="media" disabled={!can3d} aria-keyshortcuts="p" aria-label="Bildschirmfoto" title="Bildschirmfoto als PNG (P)" onClick={screenshot} />
+              {!compactBar && (
+                <Button icon="media" disabled={!can3d} aria-keyshortcuts="p" aria-label="Bildschirmfoto" title="Bildschirmfoto als PNG (P)" onClick={screenshot} />
+              )}
             </ButtonGroup>
           )}
-          <Button minimal className="studio-full-btn" icon={fullscreen ? "minimize" : "fullscreen"} aria-label="Vollbild" title="Vollbild (F)" onClick={toggleFullscreen} />
-          <Button minimal className="studio-kiosk-btn" icon="desktop" aria-label="Hallenbildschirm" title="Hallenbildschirm: ohne Bedienelemente, Rundgang (Esc beendet)"
-            disabled={gl === false}
-            onClick={() => { setKiosk(true); setView("three"); startTour(true); }} />
+          {!compactBar && (
+            <>
+              <Button minimal className="studio-full-btn" icon={fullscreen ? "minimize" : "fullscreen"} aria-label="Vollbild" title="Vollbild (F)" onClick={toggleFullscreen} />
+              <Button minimal className="studio-kiosk-btn" icon="desktop" aria-label="Hallenbildschirm" title="Hallenbildschirm: ohne Bedienelemente, Rundgang (Esc beendet)"
+                disabled={gl === false}
+                onClick={() => { setKiosk(true); setView("three"); startTour(true); }} />
+            </>
+          )}
           {agent && (
             <Button minimal icon="chat" className="studio-agent-btn" active={copilot.open} aria-pressed={copilot.open}
               aria-label="Assistent ein- oder ausblenden" title="Assistent ein-/ausblenden (Strg+Shift+A)"
               onClick={copilot.toggle} />
           )}
-          <span className="theme-switch"><ThemeSwitch /></span>
+          {!compactBar && <span className="theme-switch"><ThemeSwitch /></span>}
           <KeyPopover placement="bottom-end" content={
             <Menu>
+              {compactBar && (
+                <>
+                  {admin && (
+                    <MenuItem icon="office" text="Neue Halle anlegen …" onClick={() => setCreatorOpen(true)} />
+                  )}
+                  {can3d && (
+                    <>
+                      <MenuItem icon="media" text="Bildschirmfoto (P)" onClick={screenshot} />
+                      <MenuItem icon="cog" text={quality === "hoch" ? "Darstellung: Hoch → Schnell" : "Darstellung: Schnell → Hoch"}
+                        onClick={() => setQuality(quality === "hoch" ? "schnell" : "hoch")} />
+                    </>
+                  )}
+                  <MenuItem icon={fullscreen ? "minimize" : "fullscreen"} text={fullscreen ? "Vollbild beenden (F)" : "Vollbild (F)"} onClick={toggleFullscreen} />
+                  <MenuItem icon="desktop" text="Hallenbildschirm" disabled={gl === false}
+                    onClick={() => { setKiosk(true); setView("three"); startTour(true); }} />
+                  <MenuItem icon="contrast" text="Darstellung (Hell / Dunkel)" onClick={() => { cycleMode(); window.dispatchEvent(new Event(THEME_EVENT)); }} />
+                  <MenuDivider />
+                </>
+              )}
               <MenuItem icon="share" text="Zum Portal (Leitstand)" href="/app/#/arbeitsvorrat" target="_blank" rel="noopener" />
               <MenuItem icon="layout" text="Digitaler Grundriss" href="/twin/" target="_blank" rel="noopener" />
               <MenuItem icon="link" text="Studio-Link kopieren" onClick={() => void copyStudioLink()} />
@@ -1115,6 +1151,12 @@ export default function Studio({ user, demo, agent = false, onLogout }: { user: 
               onClick={() => setLeftTab("stationen")} />
             <Button minimal icon="diagnosis" text="Befunde" aria-pressed={leftTab === "befunde"} active={leftTab === "befunde"}
               onClick={() => setLeftTab("befunde")} />
+            <Button minimal icon="predictive-analysis" text="Simulation" aria-pressed={leftTab === "simulation"} active={leftTab === "simulation"}
+              onClick={() => setLeftTab("simulation")} />
+            {admin && (
+              <Button minimal icon="path-search" text="Wege" aria-pressed={leftTab === "wege"} active={leftTab === "wege"}
+                onClick={() => setLeftTab("wege")} />
+            )}
           </div>
         )}
         {leftTab === "befunde" && office ? (
@@ -1485,18 +1527,11 @@ function LayerItem({ on, label, onClick, disabled }: { on: boolean; label: strin
 function FloorPicker({ topo, floorId, onPick }: {
   topo: ReturnType<typeof useTopology>["topo"]; floorId: number | null; onPick: (id: number) => void;
 }) {
-  const options = useMemo(() => {
-    const out: { value: number; label: string }[] = [];
-    for (const s of topo?.sites ?? []) {
-      for (const h of s.halls) {
-        for (const f of h.floors) out.push({ value: f.id, label: `${h.name} · ${f.level_name || `Ebene ${f.level}`}` });
-      }
-    }
-    for (const h of topo?.unsited_halls ?? []) {
-      for (const f of h.floors) out.push({ value: f.id, label: `${h.name} · ${f.level_name || `Ebene ${f.level}`}` });
-    }
-    return out;
-  }, [topo]);
+  const withSite = (topo?.sites?.length ?? 0) > 1;
+  const options = useMemo(
+    () => allFloors(topo).map((r) => ({ value: r.floor.id, label: floorLabel(r, withSite) })),
+    [topo, withSite],
+  );
   if (options.length <= 1) return null;
   return (
     <HTMLSelect className="studio-floor" aria-label="Halle und Ebene" value={floorId ?? ""} options={options}

@@ -23,7 +23,7 @@ from ..core.nesting_kerf import _allowed
 from ..core.nesting import resolve_policy
 from ..core.plate_check import Window, check_plate, in_hole_of, local_rings, plate_metrics
 from ..core.routing import eligibility, job_minutes, needs_changeover
-from ..models import (AuditLog, Order, OrderPosition, Product, WorkItem, WorkOrder,
+from ..models import (AuditLog, Offcut, Order, OrderPosition, Product, WorkItem, WorkOrder,
                       WorkOrderStatus, WorkPlate)
 from ..render.dxf import _find_host
 from .batch_runner import (STANDALONE_NEST_MS, RenestError, _batch_part, _run_lock, load_products,
@@ -294,6 +294,16 @@ def _replan(db: Session, wo: WorkOrder) -> None:
     wo.planned_min = job_minutes(job, station, needs_changeover(job, station)) or 0.0
 
 
+def _release_plate_offcut(db: Session, wo: WorkOrder, row: WorkPlate) -> None:
+    if not row.offcut_id:
+        return
+    offcut = db.get(Offcut, row.offcut_id)
+    if offcut is not None and offcut.status == "reserved" and offcut.work_order_no == wo.no:
+        offcut.status = "available"
+        offcut.work_order_no = ""
+    row.offcut_id = None
+
+
 def save_layout(db: Session, wo: WorkOrder, plates: list[dict], version: str, actor: str,
                 *, restored: bool = False) -> dict:
     reason = blocked_reason(wo)
@@ -335,6 +345,7 @@ def save_layout(db: Session, wo: WorkOrder, plates: list[dict], version: str, ac
     if wo.auto_layout is None and not restored:
         wo.auto_layout = _snapshot(wo)
     rows = sorted(wo.plates, key=lambda p: p.idx)
+    old_full = sum(1 for row in rows if not row.offcut_id)
     used = plate_area = 0.0
     for idx, (plate, items) in enumerate(zip(plates, resolved)):
         window = _window(wo, plate["fmt"])
@@ -344,6 +355,8 @@ def save_layout(db: Session, wo: WorkOrder, plates: list[dict], version: str, ac
         placements = [{**i, "from_remnant": i["tag"] in nested} for i in items]
         if idx < len(rows):
             row = rows[idx]
+            if row.offcut_id and [float(row.fmt[0]), float(row.fmt[1])] != [window.w, window.h]:
+                _release_plate_offcut(db, wo, row)
         else:
             row = WorkPlate(work_order_id=wo.id, idx=idx, status=WorkOrderStatus.open)
             db.add(row)
@@ -360,12 +373,18 @@ def save_layout(db: Session, wo: WorkOrder, plates: list[dict], version: str, ac
         used += metrics["used_area_m2"]
         plate_area += metrics["plate_area_m2"]
     for row in rows[len(plates):]:
+        _release_plate_offcut(db, wo, row)
         # Die Teile sind schon umgehängt. Eine geladene alte Liste nähme sie sonst
         # über die Kaskade mit, und der Innenauftrag verlöre Marken.
         db.expire(row, ["items"])
         db.delete(row)
 
-    delta = len(plates) - wo.n_plates
+    new_full = sum(
+        1
+        for idx in range(len(plates))
+        if not (idx < len(rows) and rows[idx].offcut_id)
+    )
+    delta = new_full - old_full
     product = db.get(Product, wo.mat)
     if delta and product is not None:
         move_stock(db, product, -delta, reason="layout", actor=actor, work_order_no=wo.no,

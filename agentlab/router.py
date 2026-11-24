@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from gimel.db import get_db
-from gimel.models import AuditLog, User
+from gimel.models import AuditLog, Role, User
 from gimel.security import has_admin_work, require_admin, require_staff, require_worker
 
 from . import files as file_service
@@ -417,8 +418,28 @@ async def refresh_provider_models(
             "default_model": row.default_model}
 
 
+def _has_voice_route(routes) -> bool:
+    for r in routes:
+        if getattr(r, "path", "") == "/api/agent/voice":
+            return True
+        orig = getattr(r, "original_router", None)
+        if orig is not None and _has_voice_route(getattr(orig, "routes", ())):
+            return True
+    return False
+
+
+def _voice_mounted(request: Request) -> bool:
+    if os.environ.get("GIMEL_VOICE") == "1":
+        return True
+    app = getattr(request, "app", None)
+    if app is None:
+        return False
+    return _has_voice_route(getattr(app, "routes", ()))
+
+
 @router.get("/config")
 def config(
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(require_worker)],
 ) -> dict:
@@ -436,6 +457,7 @@ def config(
         ),
         "provider": _provider_out(row, user) if row else None,
         "admin": _admin(user),
+        "voice_enabled": _voice_mounted(request),
         "web_enabled": agent_settings.get_bool(db, "agent_web_enabled"),
         "sandbox_enabled": agent_settings.get_bool(db, "agent_sandbox_enabled"),
         "max_steps": agent_settings.get_int(db, "agent_max_steps"),
@@ -1210,6 +1232,27 @@ def list_changes(
     return {"changes": [_change_out(c) for c in rows]}
 
 
+@router.post("/changes/{change_id}/revert")
+def revert_any_change(
+    change_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(require_worker)],
+) -> dict:
+    change = db.get(AgentChange, change_id)
+    if change is None:
+        raise HTTPException(status_code=404, detail="Änderung nicht gefunden.")
+    if change.user_id != user.id and not (has_admin_work(user) or user.role == Role.staff):
+        raise HTTPException(status_code=404, detail="Änderung nicht gefunden.")
+    try:
+        revert(db, change, user)
+        db.commit()
+    except RevertConflict as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    db.refresh(change)
+    return _change_out(change)
+
+
 @router.post("/chats/{chat_id}/changes/{change_id}/revert")
 def revert_change(
     chat_id: int,
@@ -1623,6 +1666,20 @@ def approve_proposal(
     if not allowed(spec, user):
         raise HTTPException(status_code=403, detail="Für die Ausführung dieses Vorschlags fehlt die Berechtigung.")
 
+    claimed = (
+        db.query(AgentActionProposal)
+        .filter(AgentActionProposal.id == proposal_id, AgentActionProposal.status == "pending")
+        .update({"status": "executing"}, synchronize_session=False)
+    )
+    db.commit()
+    if claimed != 1:
+        db.expire_all()
+        cur = db.get(AgentActionProposal, proposal_id)
+        cur_status = cur.status if cur else "unbekannt"
+        raise HTTPException(status_code=409, detail=f"Vorschlag steht bereits auf „{cur_status}“.")
+    row = db.get(AgentActionProposal, proposal_id)
+    assert row is not None
+
     chat = db.get(AgentChat, row.chat_id) if row.chat_id else None
     try:
         result = execute_tool(
@@ -1639,6 +1696,17 @@ def approve_proposal(
         row.result_summary = str(exc)[:400]
         db.commit()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        row = db.get(AgentActionProposal, proposal_id)
+        if row is not None:
+            row.status = "failed"
+            row.decided_by = user.email
+            row.decided_at = _now()
+            row.decision_note = body.note
+            row.result_summary = str(exc)[:400]
+            db.commit()
+        raise
 
     row.status = "approved"
     row.decided_by = user.email

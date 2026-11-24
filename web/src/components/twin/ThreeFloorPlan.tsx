@@ -122,6 +122,17 @@ function starSprite(): THREE.CanvasTexture {
   return tex;
 }
 
+function disposeGroup(group: THREE.Object3D | null | undefined, scene?: THREE.Scene | null): void {
+  if (!group) return;
+  group.traverse((o) => {
+    if (o instanceof CSS2DObject) o.element.remove();
+  });
+  group.userData?.cleanup?.();
+  if (scene) scene.remove(group);
+  else group.removeFromParent();
+  disposeTree(group);
+}
+
 function disposeTree(root: THREE.Object3D): void {
   root.traverse((o) => {
     const draw = o as THREE.Mesh | THREE.Line;
@@ -1188,8 +1199,12 @@ function ThreeFloorPlan({
     () => robotJobs.filter((j) => j.floor_id === floor.id && Array.isArray(j.route) && j.route.length >= 2),
     [robotJobs, floor.id],
   );
+  const robotReceivedRef = useRef<{ at: string | null | undefined; ms: number }>({ at: undefined, ms: Date.now() });
+  if (robotReceivedRef.current.at !== sampledAt) {
+    robotReceivedRef.current = { at: sampledAt, ms: Date.now() };
+  }
   const drawableRobots = useMemo(
-    () => floorRobots.filter((r) => robotPoseAt(r, sampledAt, Date.now()) !== null),
+    () => floorRobots.filter((r) => robotPoseAt(r, sampledAt, Date.now(), robotReceivedRef.current.ms) !== null),
     [floorRobots, sampledAt],
   );
   useEffect(() => {
@@ -1369,7 +1384,7 @@ function ThreeFloorPlan({
             // Der Arm fährt seinen Zyklus immer, auch im Stand (armCycle.ts).
             if (obj.userData?.armCycle) { ambient = true; break; }
             const robot = robotDataRef.current.get(id);
-            if (robot && robotMovingAt(robot, robotSampleRef.current, nowR)) { ambient = true; break; }
+            if (robot && robotMovingAt(robot, robotSampleRef.current, nowR, robotReceivedRef.current.ms)) { ambient = true; break; }
           }
         }
       }
@@ -1421,17 +1436,18 @@ function ThreeFloorPlan({
       // Stand, die Schleife bewegt ihn flüssig bis zur nächsten Antwort.
       // Wer Bewegung reduziert haben will, sieht den letzten Serverstand.
       const stamp = robotSampleRef.current ? Date.parse(robotSampleRef.current) : NaN;
-      const nowMs = reduceMotionRef.current && Number.isFinite(stamp) ? stamp : Date.now();
+      const nowMs = Date.now();
+      const recMs = reduceMotionRef.current && Number.isFinite(stamp) ? nowMs : robotReceivedRef.current.ms;
       for (const [id, group] of robotObjectsRef.current) {
         // Arm mit Zelle: Arbeitszyklus aus der Wanduhr (models/armCell.ts).
         const cell = group.userData.armCell as { animate(seconds: number): void } | undefined;
         if (cell) cell.animate(reduceMotionRef.current ? 0 : performance.now() / 1000);
         const robot = robotDataRef.current.get(id);
         if (!robot) continue;
-        const pose = robotPoseAt(robot, robotSampleRef.current, nowMs);
+        const pose = robotPoseAt(robot, robotSampleRef.current, nowMs, recMs);
         if (!pose) continue;
         group.position.set(pose.x, 0.03, pose.y);
-        steerVehicle(group, pose.heading_deg, Math.min(0.1, walkDt), robotMovingAt(robot, robotSampleRef.current, nowMs),
+        steerVehicle(group, pose.heading_deg, Math.min(0.1, walkDt), robotMovingAt(robot, robotSampleRef.current, nowMs, recMs),
           Number(robot.speed_m_s) || 1, reduceMotionRef.current);
         const halo = group.getObjectByName("collision-halo");
         if (halo) halo.visible = collisionRobotsRef.current.has(id);
@@ -1695,12 +1711,28 @@ function ThreeFloorPlan({
     glRef.current?.(true);
     return () => {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      clearSelectionRef.current?.();
       hqRef.current?.dispose();
       hqRef.current = null;
-      if (robotLayerRef.current) {
-        disposeTree(robotLayerRef.current);
-        robotLayerRef.current = null;
-      }
+      disposeGroup(rootGroupRef.current, scene);
+      rootGroupRef.current = null;
+      disposeGroup(extrasRef.current, scene);
+      extrasRef.current = null;
+      disposeGroup(mapGroupRef.current, scene);
+      mapGroupRef.current = null;
+      disposeGroup(overlayLayerRef.current, scene);
+      overlayLayerRef.current = null;
+      disposeGroup(staffedLayerRef.current, scene);
+      staffedLayerRef.current = null;
+      disposeGroup(collisionLayerRef.current, scene);
+      collisionLayerRef.current = null;
+      disposeGroup(robotLayerRef.current, scene);
+      robotLayerRef.current = null;
+      disposeGroup(simRef.current.layer, scene);
+      simRef.current.layer = null;
+      disposeGroup(measureRef.current.group, scene);
+      measureRef.current.group = null;
+      if (DEBUG_3D) delete (window as any).__gimel3d;
       robotObjectsRef.current.clear();
       robotDataRef.current.clear();
       seen.disconnect();
@@ -2872,6 +2904,11 @@ function ThreeFloorPlan({
     // Neu gebaute Linien kennen die Bühnengröße noch nicht: ohne diesen Aufruf
     // blieben ihre Auflösungen nach einem späteren Neuaufbau bei 1 × 1.
     resizeRef.current?.();
+    if (hqRef.current) {
+      hqRef.current.prune();
+      hqRef.current.applyShadows(scene);
+      hqRootRef.current = { root, frame: 0 };
+    }
     setRootRev((n) => n + 1);
     if (DEBUG_3D && mountRef.current) {
       const d = mountRef.current.dataset;
@@ -2890,6 +2927,8 @@ function ThreeFloorPlan({
   // Abdunkeln tauscht Materialien gegen Klone und merkt sich das Original am
   // Körper (``userData.selBase``); Aufheben setzt es zurück. Kein Neuaufbau.
   const applySelectionRef = useRef<(() => void) | null>(null);
+  const clearSelectionRef = useRef<(() => void) | null>(null);
+  const activeDimMatsRef = useRef<Set<THREE.Material>>(new Set());
   useEffect(() => {
     const root = rootGroupRef.current;
     if (!ready || !root) return;
@@ -2904,7 +2943,6 @@ function ThreeFloorPlan({
     const byId = new Map<number, Station>();
     for (const st of stations) if (st.id != null) byId.set(st.id, st);
     const clones = new Map<THREE.Material, THREE.Material>();
-    const made: THREE.Material[] = [];
     const dimMat = (m: THREE.Material): THREE.Material => {
       let c = clones.get(m);
       if (!c) {
@@ -2914,12 +2952,40 @@ function ThreeFloorPlan({
         c.opacity = (m.opacity ?? 1) * 0.42;
         c.depthWrite = false;
         clones.set(m, c);
-        made.push(c);
+        activeDimMatsRef.current.add(c);
       }
       return c;
     };
     const parts = new Map<THREE.Object3D, MotionPart>();
     for (const part of motionRef.current) parts.set(part.obj, part);
+    const pruneUnusedDimMats = (r: THREE.Object3D) => {
+      const used = new Set<THREE.Material>();
+      r.traverse((x) => {
+        const d = x as THREE.Mesh | THREE.LineSegments;
+        if (!d.material) return;
+        for (const m of Array.isArray(d.material) ? d.material : [d.material]) {
+          if (m.userData?.selDim) used.add(m);
+        }
+      });
+      for (const m of [...activeDimMatsRef.current]) {
+        if (!used.has(m)) { m.dispose(); activeDimMatsRef.current.delete(m); }
+      }
+    };
+    const clearSelection = () => {
+      const r = rootGroupRef.current;
+      if (!r) return;
+      r.traverse((x) => {
+        const d = x as THREE.Mesh | THREE.LineSegments;
+        const base = d.userData?.selBase as THREE.Material | THREE.Material[] | undefined;
+        if (!base) return;
+        d.material = base;
+        delete d.userData.selBase;
+        const part = parts.get(d);
+        if (part && part.selBaseOpacity != null) { part.baseOpacity = part.selBaseOpacity; part.selBaseOpacity = undefined; }
+      });
+      pruneUnusedDimMats(r);
+    };
+    clearSelectionRef.current = clearSelection;
     const apply = () => {
       const r = rootGroupRef.current;
       if (r !== root) return;
@@ -2988,22 +3054,24 @@ function ThreeFloorPlan({
               d.material = Array.isArray(d.material) ? d.material.map(dimMat) : dimMat(d.material);
               if (part) { part.selBaseOpacity = part.baseOpacity; part.baseOpacity *= 0.42; }
             } else if (!dim && base) {
-              const cur = d.material;
               d.material = base;
               delete d.userData.selBase;
-              for (const m of Array.isArray(cur) ? cur : [cur]) if (m.userData?.selDim) m.dispose();
               if (part && part.selBaseOpacity != null) { part.baseOpacity = part.selBaseOpacity; part.selBaseOpacity = undefined; }
             }
           });
         }
       };
       visit(root);
+      pruneUnusedDimMats(root);
       labelsDirtyRef.current = true;
       invalidate();
     };
     applySelectionRef.current = apply;
     apply();
-    return () => { applySelectionRef.current = null; };
+    return () => {
+      applySelectionRef.current = null;
+      clearSelectionRef.current = null;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, rootRev, selectedId, highlightIds, flow, stations, themeTick, walk]);
 
@@ -3073,7 +3141,7 @@ function ThreeFloorPlan({
         }
       }
       for (const r of floorRobots) {
-        const pose = robotPoseAt(r, sampledAt, Date.now());
+        const pose = robotPoseAt(r, sampledAt, Date.now(), robotReceivedRef.current.ms);
         if (!pose) continue;
 
         if (r.route.length >= 2) {
@@ -3328,7 +3396,7 @@ function ThreeFloorPlan({
 
     const report = robotCollisionReport({
       world, floor, robots: floorRobots, jobs: floorJobs, stations,
-      poseOf: (r) => robotPoseAt(r, sampledAt, Date.now()),
+      poseOf: (r) => robotPoseAt(r, sampledAt, Date.now(), robotReceivedRef.current.ms),
       radius: ROBOT_RADIUS_M, clearance: CLEARANCE_M,
     });
     // Der Ring am Fahrzeug folgt in der Bildschleife; die Menge gilt sofort.
@@ -3477,8 +3545,8 @@ function ThreeFloorPlan({
     const scene = sceneRef.current;
     if (!scene) return;
     if (extrasRef.current) {
-      extrasRef.current.traverse((o) => { if (o instanceof CSS2DObject) o.element.remove(); });
-      scene.remove(extrasRef.current);
+      disposeGroup(extrasRef.current, scene);
+      extrasRef.current = null;
     }
     const extras = new THREE.Group();
     extras.name = "hall-extras";
@@ -3835,16 +3903,21 @@ function ThreeFloorPlan({
   useEffect(() => {
     const renderer = rendererRef.current, scene = sceneRef.current;
     if (!ready || !renderer || !scene || quality !== "hoch") return;
+    clearSelectionRef.current?.();
     const hq = enableHighQuality(renderer, scene);
     hq.fit(sceneBounds(floor, stations), hallH);
     hqRef.current = hq;
-    hqRootRef.current = { root: null, frame: 0 };
+    hq.applyShadows(scene);
+    hqRootRef.current = { root: rootGroupRef.current, frame: 0 };
+    applySelectionRef.current?.();
     frameWatchRef.current = new FrameWatch(48, () => qualityDropRef.current?.());
     return () => {
+      clearSelectionRef.current?.();
       hq.dispose();
       if (hqRef.current === hq) hqRef.current = null;
       frameWatchRef.current = null;
       hqRootRef.current = { root: null, frame: 0 };
+      applySelectionRef.current?.();
     };
   // Die Halle selbst passt der nächste Effekt ein; hier nur Stufe und Thema.
   // eslint-disable-next-line react-hooks/exhaustive-deps

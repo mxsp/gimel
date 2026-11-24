@@ -65,7 +65,9 @@ export function enableHighQuality(
   renderer.shadowMap.autoUpdate = false;
 
   const pmrem = new THREE.PMREMGenerator(renderer);
-  const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  const room = new RoomEnvironment();
+  const env = pmrem.fromScene(room, 0.04).texture;
+  room.dispose();
   const prevEnv = scene.environment;
   scene.environment = env;
   scene.environmentIntensity = 0.55;

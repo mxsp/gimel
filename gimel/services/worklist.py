@@ -1009,6 +1009,18 @@ def set_state(
     """
     if state not in ("waiting", "ready", "running", "done", "cancelled"):
         raise ValueError(f"Unbekannter Zustand: {state}")
+    wo_for_task: WorkOrder | None = None
+    if row.kind in ("pick", "cut"):
+        wo_for_task = db.query(WorkOrder).filter(WorkOrder.no == row.ref).first()
+        if (
+            wo_for_task is not None
+            and wo_for_task.status == WorkOrderStatus.cancelled
+            and state != "cancelled"
+        ):
+            raise ValueError(
+                f"Innenauftrag {wo_for_task.no} ist storniert und kann nicht "
+                "wieder geöffnet werden."
+            )
     now = _now()
     # Vor dem Überschreiben der Notiz festhalten: der Schlüssel beschreibt die
     # Quelle, nicht den Text, den der Bediener beim Schließen tippt.
@@ -1045,7 +1057,7 @@ def set_state(
             row.closed_reason = ""
 
     if row.kind == "pick":
-        wo = db.query(WorkOrder).filter(WorkOrder.no == row.ref).first()
+        wo = wo_for_task
         if wo is not None:
             if state == "done" and wo.material_staged_at is None:
                 wo.material_staged_at = now
@@ -1054,7 +1066,7 @@ def set_state(
                 wo.material_staged_at = None
                 wo.material_staged_by = ""
     elif row.kind == "cut":
-        wo = db.query(WorkOrder).filter(WorkOrder.no == row.ref).first()
+        wo = wo_for_task
         if wo is not None:
             if state == "running" and wo.started_at is None:
                 wo.started_at = now
@@ -1071,24 +1083,15 @@ def set_state(
                 # Fertigung und Packtisch.
                 for p in wo.plates:
                     p.status = WorkOrderStatus.done
-                item_orders = {
-                    i.order_no
-                    for i in db.query(WorkItem)
-                    .filter(WorkItem.work_order_id == wo.id)
-                    .all()
-                }
+                items = db.query(WorkItem).filter(WorkItem.work_order_id == wo.id).all()
+                item_orders = {i.order_no for i in items}
                 wo.order_done = {ono: now.isoformat() for ono in item_orders}
-                ids = [
-                    i.position_id
-                    for i in db.query(WorkItem)
-                    .filter(WorkItem.work_order_id == wo.id)
-                    .all()
-                    if i.position_id
-                ]
+                ids = [i.position_id for i in items if i.position_id]
                 if ids:
+                    from ..db import chunked_in
                     (
                         db.query(OrderPosition)
-                        .filter(OrderPosition.id.in_(ids))
+                        .filter(chunked_in(OrderPosition.id, ids))
                         .update(
                             {OrderPosition.production_status: "done"},
                             synchronize_session=False,

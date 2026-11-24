@@ -52,13 +52,19 @@ def _clear(a: Point, b: Point, walls: Sequence[Sequence[Point]], outline: Sequen
     return not segment_blocked(a, b, walls) and not segment_leaves_outline(a, b, outline)
 
 
+def _overlaps_box(poly: Sequence[Point], lo_x: float, hi_x: float, lo_y: float, hi_y: float) -> bool:
+    xs = [p[0] for p in poly]
+    ys = [p[1] for p in poly]
+    return max(xs) >= lo_x and min(xs) <= hi_x and max(ys) >= lo_y and min(ys) <= hi_y
+
+
 def detour(a: Point, b: Point, blockers: Sequence[Sequence[Point]], outline: Sequence[Point],
            *, pad: float = CLEARANCE_M) -> list[Point] | None:
     """Kürzester freier Weg a → b um die Körper herum (Sichtgraph über die
     Ecken der aufgeweiteten Körper). ``None``, wenn es keinen gibt."""
-    lo_x, hi_x = min(a[0], b[0]) - SEARCH_MARGIN_M, max(a[0], b[0]) + SEARCH_MARGIN_M
-    lo_y, hi_y = min(a[1], b[1]) - SEARCH_MARGIN_M, max(a[1], b[1]) + SEARCH_MARGIN_M
-    near = [p for p in blockers if len(p) >= 3 and any(lo_x <= x <= hi_x and lo_y <= y <= hi_y for x, y in p)]
+    lo_x, hi_x = min(a[0], b[0]) - SEARCH_MARGIN_M - pad, max(a[0], b[0]) + SEARCH_MARGIN_M + pad
+    lo_y, hi_y = min(a[1], b[1]) - SEARCH_MARGIN_M - pad, max(a[1], b[1]) + SEARCH_MARGIN_M + pad
+    near = [p for p in blockers if len(p) >= 3 and _overlaps_box(p, lo_x, hi_x, lo_y, hi_y)]
     walls = [_box(p, pad) for p in near]
     if _clear(a, b, walls, outline):
         return [a, b]

@@ -32,9 +32,16 @@ def _first_floor_id(db: Session) -> Optional[int]:
     return int(row[0]) if row else None
 
 
-def floor_id_of_station(db: Session, station: FactoryStation) -> Optional[int]:
+def floor_id_of_station(
+    db: Session,
+    station: FactoryStation,
+    *,
+    default_floor_id: Optional[int] = None,
+) -> Optional[int]:
     """Ebene einer Station; leer heißt laut Hausregel die erste Ebene."""
-    return int(station.floor_id) if station.floor_id else _first_floor_id(db)
+    if station.floor_id:
+        return int(station.floor_id)
+    return default_floor_id if default_floor_id is not None else _first_floor_id(db)
 
 
 def _floor(db: Session, floor_id: Optional[int]) -> FactoryFloor:
@@ -66,9 +73,10 @@ def _station_dict(station: FactoryStation, floor_id: Optional[int]) -> dict:
 def station_bodies(db: Session, floor_id: Optional[int]) -> list[list[Point]]:
     """Stationskörper einer Ebene als Vierecke — für Wege, die nicht durch eine
     Maschine fahren dürfen."""
+    default_floor_id = _first_floor_id(db)
     out: list[list[Point]] = []
     for s in db.query(FactoryStation).filter(FactoryStation.active.is_(True)).all():
-        if floor_id_of_station(db, s) != floor_id:
+        if floor_id_of_station(db, s, default_floor_id=default_floor_id) != floor_id:
             continue
         w, h = float(s.w or 0.0), float(s.h or 0.0)
         if w <= 0 or h <= 0:

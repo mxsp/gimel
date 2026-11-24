@@ -1,6 +1,6 @@
 import { Button, HTMLSelect, Spinner, Tag } from "@blueprintjs/core";
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, Change, listChanges, revertChange } from "./api";
+import { ApiError, Change, listChanges, revertAnyChange, revertChange } from "./api";
 
 export default function Changes({ chatId, onChanged }: { chatId: number | null; onChanged: () => void }) {
   const [rows, setRows] = useState<Change[]>([]);
@@ -27,10 +27,21 @@ export default function Changes({ chatId, onChanged }: { chatId: number | null; 
   const shown = rows.filter((row) => status === "all" || row.status === status);
 
   const undo = async (row: Change) => {
-    if (row.chat_id == null) return;
     setBusy(row.id); setError("");
     try {
-      await revertChange(row.chat_id, row.id);
+      if (row.chat_id != null) {
+        try {
+          await revertChange(row.chat_id, row.id);
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) {
+            await revertAnyChange(row.id);
+          } else {
+            throw err;
+          }
+        }
+      } else {
+        await revertAnyChange(row.id);
+      }
       await load();
       onChanged();
     } catch (err) {
@@ -78,7 +89,7 @@ export default function Changes({ chatId, onChanged }: { chatId: number | null; 
                   {!row.reversible && <Tag minimal intent="warning">nicht rückholbar</Tag>}
                 </td>
                 <td>
-                  {row.status === "applied" && row.reversible && row.chat_id != null && (
+                  {row.status === "applied" && row.reversible && (
                     <Button small minimal icon="undo" text="Rückgängig" loading={busy === row.id}
                       onClick={() => undo(row)} />
                   )}

@@ -120,6 +120,16 @@ export default function Proposals({
                 </span>
               </div>
               {row.rationale && <p style={{ margin: "4px 0 8px" }}>{row.rationale}</p>}
+              {Object.keys(row.arguments || {}).length > 0 && (
+                <div style={{ fontSize: 12, marginBottom: 8, padding: "6px 8px", borderRadius: 4, background: "var(--g-surface-2, #f5f7f9)" }}>
+                  <strong>Argumente (<code>{row.tool_name}</code>): </strong>
+                  {Object.entries(row.arguments).map(([k, v]) => (
+                    <span key={k} style={{ marginRight: 10 }}>
+                      <code>{k}</code>: <code>{typeof v === "object" && v !== null ? JSON.stringify(v) : String(v ?? "—")}</code>
+                    </span>
+                  ))}
+                </div>
+              )}
               {Object.keys(row.impact_summary || {}).length > 0 && (
                 <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>
                   <strong>Simulierte Wirkung: </strong>

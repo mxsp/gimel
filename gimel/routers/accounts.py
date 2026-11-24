@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -353,18 +354,25 @@ def create_account(
         role=body.role,
         active=True,
     )
-    db.add(user)
-    db.flush()
-    db.add(
-        AuditLog(
-            actor=actor.email,
-            action="account_create",
-            entity="user",
-            entity_id=str(user.id),
-            detail={"username": username, "role": body.role.value},
+    try:
+        db.add(user)
+        db.flush()
+        db.add(
+            AuditLog(
+                actor=actor.email,
+                action="account_create",
+                entity="user",
+                entity_id=str(user.id),
+                detail={"username": username, "role": body.role.value},
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Dieser Benutzername ist bereits vergeben.",
+        ) from exc
     db.refresh(user)
     return _to_out(user, 0)
 
@@ -407,6 +415,16 @@ def update_account(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Erlaubte Rollen: admin, staff, worker.",
             )
+        if Role.customer in (user.role, body.role) and Role.worker in (user.role, body.role):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Kundenkonten werden nicht zu Werker-Konten. Bitte ein eigenes Werker-Konto anlegen.",
+            )
+        if user.id == actor.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Die eigene Rolle und den eigenen Zugang ändert ein anderer Administrator.",
+            )
         if user.role == Role.admin and body.role != Role.admin:
             assert_not_last_admin(db, user)
         changed["role"] = [user.role.value, body.role.value]
@@ -415,6 +433,11 @@ def update_account(
 
     if body.active is not None and body.active != user.active:
         if not body.active:
+            if user.id == actor.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Die eigene Rolle und den eigenen Zugang ändert ein anderer Administrator.",
+                )
             assert_not_last_admin(db, user)
             revoke_sessions = True
         changed["active"] = [bool(user.active), bool(body.active)]
@@ -596,6 +619,11 @@ def delete_account(
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Konto nicht gefunden.")
+    if user.id == actor.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Das eigene Konto lässt sich nicht löschen.",
+        )
     assert_not_last_admin(db, user)
     revoke_other_sessions(db, user, keep_id=None)
 
