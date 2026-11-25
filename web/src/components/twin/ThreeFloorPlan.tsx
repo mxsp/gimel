@@ -30,7 +30,7 @@ import { buildRobotModel, robotStatusColour } from "./robotModel";
 import { SIM_STATE_WORD, SimSegment, SimState, trackPose } from "./fleetSim";
 import { robotMovingAt, robotPoseAt } from "./robots";
 import { AISLE_LANE_M, aisleNetworkMetres, aisleWays, hallHeight, lanePolygon, wayArrows } from "./aisleWays";
-import { buildTwinWorld, CLEARANCE_M, clearPolyline, clearWays, obstacleHasDoor, obstacleWallPieces, pointInPolygon, robotCollisionReport, ROBOT_RADIUS_M, wallPieces } from "./collision";
+import { buildTwinWorld, CLEARANCE_M, clearPolyline, clearWays, obstacleDoorOpenings, obstacleHasDoor, obstacleWallPieces, pointInPolygon, robotCollisionReport, ROBOT_RADIUS_M, wallPieces } from "./collision";
 import { hallAt, hallWalkWorld, inversePlacement, nearestHallDoor, sharedBoundaryDoors, unplacePoint, unplaceYaw, type HallPlacement } from "./walkHalls";
 import { enableHighQuality, FrameWatch, HighQuality, probeDevice, Quality } from "./renderQuality";
 import {
@@ -2383,16 +2383,47 @@ function ThreeFloorPlan({
             segMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(segGeo), edgeMat));
             root.add(segMesh);
           }
+          // Wandsturz oberhalb jeder Türöffnung schließen (frameH → Wandhöhe h), keine Lücke über der Tür!
+          for (const { a: [ax, az], b: [bx, bz], kind: dk } of obstacleDoorOpenings(o, allActiveDoors)) {
+            const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+            if (len < 1e-4) continue;
+            const frameH = dk === "gate"
+              ? Math.min(4.2, hallH - 0.45)
+              : dk === "ramp"
+                ? Math.min(3.6, hallH - 0.45)
+                : Math.min(2.25, hallH - 0.3);
+            const transomH = h - frameH;
+            if (transomH <= 0.04) continue;
+            const headGeo = new THREE.BoxGeometry(len, transomH, 0.14);
+            const headMesh = new THREE.Mesh(headGeo, wallMat);
+            headMesh.position.set((ax + bx) / 2, frameH + transomH / 2, (az + bz) / 2);
+            headMesh.rotation.y = -Math.atan2(dz, dx);
+            headMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(headGeo), edgeMat));
+            root.add(headMesh);
+          }
           if (kind === "room") {
-            const lid = new THREE.Mesh(
+            const roofThick = 0.14;
+            const roofGeo = new THREE.ExtrudeGeometry(floorShape(o.points), { depth: roofThick, bevelEnabled: false });
+            roofGeo.rotateX(-Math.PI / 2);
+            const roofTopMat = new THREE.MeshBasicMaterial({
+              color: css("--g-surface-2", "#8a96a3"),
+              transparent: true, opacity: 0.92, side: THREE.DoubleSide, toneMapped: false,
+            });
+            const roofSideMat = new THREE.MeshBasicMaterial({
+              color: sideColor, transparent: true, opacity: 0.92, toneMapped: false,
+            });
+            const roofMesh = new THREE.Mesh(roofGeo, [roofTopMat, roofSideMat]);
+            roofMesh.position.y = h;
+            roofMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(roofGeo), edgeMat));
+            const roofHatch = new THREE.Mesh(
               floorGeometry(o.points),
               new THREE.MeshBasicMaterial({
-                color: css("--g-surface-2", "#8a96a3"),
-                transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
+                map: patternTexture("hatch", css("--g-floor-hatch", "#738091"), 0.34),
+                transparent: true, opacity: 0.25, depthWrite: false, side: THREE.DoubleSide,
               }),
             );
-            lid.position.y = h + 0.005;
-            root.add(lid);
+            roofHatch.position.y = h + roofThick + 0.008;
+            root.add(roofMesh, roofHatch);
           }
           continue;
         }

@@ -207,6 +207,15 @@ class Product(Base):
 
     stock: Mapped[int] = mapped_column(Integer, default=0)
     lead_days: Mapped[int] = mapped_column(Integer, default=0)
+    #: Smart-Lager & Auto-Nachschub: Meldebestand (0 = dynamisch aus Bedarf × Lieferzeit),
+    #: Zielbestand (0 = dynamisch), Sicherheitsbestand, Nachschubmodus ("propose" | "auto" | "off"),
+    #: bevorzugter Lieferant (optional; sonst automatisches Lieferanten-Scoring) und Lagereinheit.
+    min_stock: Mapped[int] = mapped_column(Integer, default=0)
+    target_stock: Mapped[int] = mapped_column(Integer, default=0)
+    safety_stock: Mapped[int] = mapped_column(Integer, default=1)
+    auto_reorder: Mapped[str] = mapped_column(String(16), default="propose")
+    preferred_supplier_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sku_unit: Mapped[str] = mapped_column(String(20), default="Platte")
     uses: Mapped[int] = mapped_column(Integer, default=0)
     url: Mapped[str] = mapped_column(String(400), default="")
     datasheet_url: Mapped[str] = mapped_column(String(400), default="")
@@ -2483,3 +2492,121 @@ class MacroSnapshot(Base):
     key: Mapped[str] = mapped_column(String(60), unique=True, index=True)  # e.g. "fx_ecb" | "chokepoints_weather" | "feed_status"
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+# ==========================================================================
+# Kalender-Termine, Team-Notizen & E-Mail-Zentrale (ERP + Copilot Lab)
+# ==========================================================================
+class CalendarEvent(Base):
+    """Betriebstermin im Kalender: Wartung, Lieferfenster, Meilenstein, Schicht oder Termin."""
+
+    __tablename__ = "calendar_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    #: termin | wartung | lieferung | meilenstein | schicht
+    kind: Mapped[str] = mapped_column(String(24), default="termin", index=True)
+    start_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    end_date: Mapped[str] = mapped_column(String(10), default="", index=True)
+    start_time: Mapped[str] = mapped_column(String(8), default="")   # HH:MM optional
+    end_time: Mapped[str] = mapped_column(String(8), default="")
+    all_day: Mapped[bool] = mapped_column(Boolean, default=True)
+    colour: Mapped[str] = mapped_column(String(20), default="#2d72d2")
+    station_id: Mapped[int | None] = mapped_column(
+        ForeignKey("factory_stations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    order_no: Mapped[str] = mapped_column(String(30), default="", index=True)
+    work_order_no: Mapped[str] = mapped_column(String(30), default="", index=True)
+    purchase_order_no: Mapped[str] = mapped_column(String(30), default="", index=True)
+    assigned_to: Mapped[str] = mapped_column(String(160), default="")
+    capacity_block_min: Mapped[float] = mapped_column(Float, default=0.0)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    note: Mapped[str] = mapped_column(EncryptedText("calendar_events.note"), default="")
+    created_by: Mapped[str] = mapped_column(String(254), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class TeamNote(Base):
+    """Interne Kollegen-Notiz & Schichtübergabe über ERP, digitale Laufkarte und Copilot Lab."""
+
+    __tablename__ = "team_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sender_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    sender_email: Mapped[str] = mapped_column(String(254), default="", index=True)
+    sender_name: Mapped[str] = mapped_column(String(160), default="")
+    recipient_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    recipient_email: Mapped[str] = mapped_column(String(254), default="", index=True)
+    recipient_name: Mapped[str] = mapped_column(String(160), default="")
+    #: Kanal für Gruppennotizen, falls kein einzelner Empfänger: alle | buero | halle | schicht | direkt
+    channel: Mapped[str] = mapped_column(String(24), default="alle", index=True)
+    #: normal | important | urgent
+    priority: Mapped[str] = mapped_column(String(16), default="normal", index=True)
+    subject: Mapped[str] = mapped_column(String(200), default="")
+    body: Mapped[str] = mapped_column(EncryptedText("team_notes.body"), default="")
+    mentions: Mapped[list] = mapped_column(JSON, default=list)
+    #: Verknüpftes Objekt: order | work_order | product | purchase_order | station | calendar | ""
+    entity_type: Mapped[str] = mapped_column(String(30), default="", index=True)
+    entity_id: Mapped[str] = mapped_column(String(80), default="", index=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("team_notes.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    ack_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    acknowledged_by: Mapped[str] = mapped_column(String(254), default="")
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: Lesestand je Benutzer-ID {"12": "2026-11-25T..."}
+    read_by: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class MailMessage(Base):
+    """E-Mail-Nachricht im Postfach (Eingang, Entwürfe, Gesendet, Archiv) für ERP & Copilot Lab."""
+
+    __tablename__ = "mail_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: inbound | outbound | draft
+    direction: Mapped[str] = mapped_column(String(16), default="outbound", index=True)
+    #: inbox | drafts | sent | archive
+    folder: Mapped[str] = mapped_column(String(16), default="drafts", index=True)
+    #: draft | queued | sent | received | failed | archived
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    from_addr: Mapped[str] = mapped_column(String(254), default="", index=True)
+    from_name: Mapped[str] = mapped_column(String(160), default="")
+    to_addrs: Mapped[list] = mapped_column(JSON, default=list)
+    cc_addrs: Mapped[list] = mapped_column(JSON, default=list)
+    reply_to: Mapped[str] = mapped_column(String(254), default="")
+    subject: Mapped[str] = mapped_column(String(300), default="")
+    body_text: Mapped[str] = mapped_column(EncryptedText("mail_messages.body_text"), default="")
+    body_html: Mapped[str] = mapped_column(EncryptedText("mail_messages.body_html"), default="")
+    ai_summary: Mapped[str] = mapped_column(EncryptedText("mail_messages.ai_summary"), default="")
+    ai_drafted: Mapped[bool] = mapped_column(Boolean, default=False)
+    thread_key: Mapped[str] = mapped_column(String(180), default="", index=True)
+    external_uid: Mapped[str] = mapped_column(String(180), default="", index=True)
+    message_id_header: Mapped[str] = mapped_column(String(240), default="")
+    in_reply_to: Mapped[str] = mapped_column(String(240), default="")
+    order_no: Mapped[str] = mapped_column(String(30), default="", index=True)
+    work_order_no: Mapped[str] = mapped_column(String(30), default="", index=True)
+    purchase_order_no: Mapped[str] = mapped_column(String(30), default="", index=True)
+    supplier_id: Mapped[int | None] = mapped_column(
+        ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    proposal_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    starred: Mapped[bool] = mapped_column(Boolean, default=False)
+    delivery_mode: Mapped[str] = mapped_column(String(24), default="")  # smtp | silent | imap | demo
+    error_note: Mapped[str] = mapped_column(String(400), default="")
+    actor: Mapped[str] = mapped_column(String(254), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

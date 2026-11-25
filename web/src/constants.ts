@@ -22,22 +22,39 @@ export const PAYMENT_TERMS: Array<[string, string]> = [
 /* Werkstoffgruppen — Schlüssel wie im Backend (PRODUCT_CATS), Beschriftung für
    die Maske. Ein neuer Werkstoff wird immer einer Gruppe zugeordnet. */
 export const PRODUCT_CATS: Array<[string, string]> = [
-  ["elastomer", "Elastomere"], ["ptfe", "Modifiziertes PTFE"], ["graphit", "Graphit"],
-  ["faser", "Faserstoffe & Hochdruck"], ["hochtemp", "Hochtemperatur"],
+  ["elastomer", "Elastomere"],
+  ["metall", "Metall & Blech"],
+  ["kunststoff", "Kunststoffe & Polymere"],
+  ["faser", "Faserstoffe & Verbund"],
+  ["holz", "Holz & Plattenwerkstoffe"],
+  ["schaum", "Schaumstoff & Kork"],
+  ["ptfe", "Modifiziertes PTFE"],
+  ["graphit", "Graphit"],
+  ["hochtemp", "Hochtemperatur"],
+  ["standard", "Allgemein / Halbzeug"],
 ];
 
 const CAT_ALIASES: Record<string, string> = {
   rubber: "Elastomere",
   elastomer: "Elastomere",
-  fibre: "Faserstoffe & Hochdruck",
-  fiber: "Faserstoffe & Hochdruck",
-  faser: "Faserstoffe & Hochdruck",
+  metall: "Metall & Blech",
+  metal: "Metall & Blech",
+  kunststoff: "Kunststoffe & Polymere",
+  plastic: "Kunststoffe & Polymere",
+  fibre: "Faserstoffe & Verbund",
+  fiber: "Faserstoffe & Verbund",
+  faser: "Faserstoffe & Verbund",
+  holz: "Holz & Plattenwerkstoffe",
+  wood: "Holz & Plattenwerkstoffe",
+  schaum: "Schaumstoff & Kork",
+  foam: "Schaumstoff & Kork",
   graphite: "Graphit",
   graphit: "Graphit",
   ptfe: "Modifiziertes PTFE",
   hochtemp: "Hochtemperatur",
-  cork: "Kork-Elastomer",
-  kork: "Kork-Elastomer",
+  cork: "Schaumstoff & Kork",
+  kork: "Schaumstoff & Kork",
+  standard: "Allgemein / Halbzeug",
 };
 
 /** Einheitliche deutsche Gruppenbezeichnung für Werkstoffe (inkl. älterer englischer Schlüssel). */
@@ -105,14 +122,23 @@ export const WORKER_ROUTES = ["heute", "auftraege", "arbeitsvorrat", "arbeitspla
    hier nicht steht, wird unverändert gezeigt — nie verschluckt. */
 const MATERIAL_GROUPS: Record<string, string> = {
   rubber: "Elastomer",
+  elastomer: "Elastomer",
+  metall: "Metall & Blech",
+  metal: "Metall",
+  kunststoff: "Kunststoff",
+  holz: "Holzwerkstoff",
+  schaum: "Schaumstoff",
   fibre: "Faserstoff",
   fiber: "Faserstoff",
+  faser: "Faserstoff",
   graphite: "Graphit",
+  graphit: "Graphit",
   cork: "Kork",
   ptfe: "PTFE",
-  metal: "Metall",
   foam: "Schaumstoff",
   mica: "Glimmer",
+  hochtemp: "Hochtemperatur",
+  standard: "Halbzeug",
 };
 
 export function materialGroupLabel(cat: string | null | undefined): string {

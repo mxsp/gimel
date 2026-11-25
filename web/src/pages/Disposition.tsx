@@ -20,6 +20,7 @@ import {
 } from "../ui";
 import type { StatusItem } from "../ui";
 import { MatName } from "../components/MaterialSelect";
+import ProductionFlowGraph from "../components/ProductionFlowGraph";
 
 /* Disposition — der Leitstand des Sammellaufs.
 
@@ -86,6 +87,7 @@ export default function Disposition({ role }: { role: string }) {
     >
       <Tabs id="dispo" selectedTabId={tab} onChange={(t) => setTab(String(t))} large renderActiveTabPanelOnly>
         <Tab id="takt" title="Leitstand" panel={<QueuePanel />} />
+        <Tab id="fluss" title="Produktionsfluss" icon="flow-branch" panel={<ProductionFlowGraph />} />
         <Tab id="laeufe" title="Verlauf" icon="history" panel={<RunsPanel wantedRun={wantedRun} />} />
       </Tabs>
 

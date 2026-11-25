@@ -52,7 +52,13 @@ def list_stock(db: Annotated[Session, Depends(get_db)],
     )
     return [StockRow(id=p.id, name=p.name, short=p.short, cat=p.cat, stock=p.stock,
                      lead_days=p.lead_days, sheets=p.sheets, active=p.active,
-                     last_movement_at=last.get(p.id), offcuts=int(offs.get(p.id, 0)))
+                     last_movement_at=last.get(p.id), offcuts=int(offs.get(p.id, 0)),
+                     min_stock=int(getattr(p, "min_stock", 0) or 0),
+                     target_stock=int(getattr(p, "target_stock", 0) or 0),
+                     safety_stock=int(getattr(p, "safety_stock", 1) or 0),
+                     auto_reorder=getattr(p, "auto_reorder", "propose") or "propose",
+                     preferred_supplier_id=getattr(p, "preferred_supplier_id", None),
+                     sku_unit=getattr(p, "sku_unit", "Platte") or "Platte")
             for p in rows]
 
 
@@ -321,5 +327,9 @@ def adjust_stock(product_id: str, body: StockAdjust, db: Annotated[Session, Depe
                     entity_id=product_id,
                     detail={"delta": body.delta, "reason": body.reason, "note": body.note}))
     db.commit()
+    if body.delta < 0:
+        from ..services import scm_analytics
+
+        scm_analytics.check_auto_reorder_for_product(db, product_id, actor=actor.email)
     db.refresh(movement)
     return movement

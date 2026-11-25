@@ -17,6 +17,7 @@ import Changes from "./Changes";
 import CommandPalette, { CommandItem } from "./CommandPalette";
 import ErrorBoundary from "./ErrorBoundary";
 import KnowledgeGraph from "./KnowledgeGraph";
+import { LabMailView, LabNotesView } from "./LabComms";
 import type { PreviewTab } from "./PreviewPane";
 import Proposals from "./Proposals";
 import Providers from "./Providers";
@@ -25,22 +26,22 @@ import SidebarUpdateButton from "./SidebarUpdateButton";
 import Stats from "./Stats";
 import Tools from "./Tools";
 
-type View = "chat" | "graph" | "agents" | "routines" | "artifacts" | "proposals" | "changes" | "stats" | "tools" | "settings";
+type View = "chat" | "mail" | "notes" | "graph" | "agents" | "routines" | "artifacts" | "proposals" | "changes" | "stats" | "tools" | "settings";
 
-const ALL_VIEWS: View[] = ["chat", "graph", "agents", "routines", "artifacts", "proposals", "changes", "stats", "tools", "settings"];
+const ALL_VIEWS: View[] = ["chat", "mail", "notes", "graph", "agents", "routines", "artifacts", "proposals", "changes", "stats", "tools", "settings"];
 
 const VIEW_LABEL: Record<View, string> = {
-  chat: "Chat", graph: "Wissensgraph", agents: "Agenten", routines: "Routinen", artifacts: "Artefakte",
+  chat: "Chat", mail: "E-Mail", notes: "Notizen", graph: "Wissensgraph", agents: "Agenten", routines: "Routinen", artifacts: "Artefakte",
   proposals: "Vorschläge", changes: "Änderungen", stats: "Statistik",
   tools: "Werkzeuge", settings: "Einstellungen",
 };
 const VIEW_ICON: Record<View, string> = {
-  chat: "chat", graph: "graph", agents: "predictive-analysis", routines: "repeat", artifacts: "application",
+  chat: "chat", mail: "envelope", notes: "annotation", graph: "graph", agents: "predictive-analysis", routines: "repeat", artifacts: "application",
   proposals: "endorsed", changes: "changes", stats: "chart",
   tools: "wrench", settings: "cog",
 };
 const TAB_EST_WIDTH: Record<View, number> = {
-  chat: 72, graph: 120, agents: 86, routines: 88, artifacts: 116,
+  chat: 72, mail: 84, notes: 88, graph: 120, agents: 86, routines: 88, artifacts: 116,
   proposals: 122, changes: 108, stats: 88, tools: 100, settings: 114,
 };
 
@@ -641,6 +642,21 @@ export default function Lab({ user, onLogout }: { user: SessionUser; onLogout: (
           onToggleContext={toggleContext}
           onOpenChanges={() => setView("changes")}
           onOpenGraph={() => setView("graph")} />
+      );
+    }
+    if (view === "mail") {
+      return (
+        <LabMailView
+          onAskCopilot={(title, prompt) => { void analyzeGraphNodeInChat({ label: title }, prompt); }}
+          onOpenProposals={() => setView("proposals")}
+        />
+      );
+    }
+    if (view === "notes") {
+      return (
+        <LabNotesView
+          onAskCopilot={(title, prompt) => { void analyzeGraphNodeInChat({ label: title }, prompt); }}
+        />
       );
     }
     if (view === "graph") {

@@ -8,6 +8,7 @@ import { SectionError } from "../components/PageStates";
 import NewProductDialog from "../components/NewProductDialog";
 import StockTimeline from "../components/StockTimeline";
 import { LocationsPanel, OffcutsPanel } from "../components/LagerPanels";
+import { LotsPanel, PurchaseOrdersPanel, SmartMrpPanel } from "../components/ScmPanels";
 import { LocationChips, StockLocationDialog } from "../components/StockLocations";
 import type { StockLocationRow } from "../factory";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -560,12 +561,15 @@ export default function Inventory() {
   const [tab, setTab] = useState("bestand");
   return (
     <PageFrame
-      title="Lager"
-      sub="Plattenbestand je Werkstoff — wo er liegt, wie er sich entwickelt, welche Reststücke wiederverwendbar sind."
+      title="Lager & Disposition"
+      sub="Plattenbestand, Smart-Disposition (MRP & Auto-Lieferant), Einkauf & Wareneingang, Chargen (EN 10204) und Reststücke."
     >
       <Tabs id="lager" selectedTabId={tab} onChange={(t) => setTab(String(t))} large
             renderActiveTabPanelOnly>
         <Tab id="bestand" title="Bestand" panel={<StockPanel />} />
+        <Tab id="mrp" title="Smart-Disposition (MRP)" panel={<SmartMrpPanel onOpenPoTab={() => setTab("einkauf")} />} />
+        <Tab id="einkauf" title="Einkauf & Wareneingang" panel={<PurchaseOrdersPanel />} />
+        <Tab id="chargen" title="Chargen & Zeugnisse" panel={<LotsPanel />} />
         <Tab id="orte" title="Lagerorte" panel={<LocationsTab />} />
         <Tab id="reste" title="Reststücke" panel={<OffcutsTab />} />
         <Tab id="erp" title="ERP-Abgleich (SAP)" panel={<ErpPanel />} />

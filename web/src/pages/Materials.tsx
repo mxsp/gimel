@@ -5,6 +5,7 @@ import { api, fmtDateTime, fmtEur } from "../api";
 import { toastError, toastSuccess } from "../toast";
 import { GLOBAL_MATERIAL_SEARCH_EVENT, consumeGlobalMaterialSearch } from "../components/GlobalMaterialSearch";
 import NewProductDialog from "../components/NewProductDialog";
+import { AutoSupplierPanel } from "../components/ScmPanels";
 import { SectionError } from "../components/PageStates";
 import { PRODUCT_CATS, productCatLabel } from "../constants";
 import { plural } from "../plural";
@@ -70,9 +71,10 @@ const MATRIX_SORT_FIELDS: SortField[] = [
 export default function Materials() {
   const [tab, setTab] = useState<string>("matrix");
   return (
-    <PageFrame title="Werkstoffe" sub="Preise, Plattenformate und Sätze — die Stammdaten hinter jedem Preis.">
+    <PageFrame title="Werkstoffe" sub="Preise, Plattenformate, Nachschubregeln, Auto-Lieferanten und Sätze — die Stammdaten hinter Kalkulation & Lieferkette.">
       <Tabs id="mat" selectedTabId={tab} onChange={(t) => setTab(String(t))} large renderActiveTabPanelOnly>
         <Tab id="matrix" title="Matrix" panel={<MatrixPanel />} />
+        <Tab id="lieferanten" title="Auto-Lieferanten & Bezugsquellen" panel={<AutoSupplierPanel />} />
         <Tab id="preisrunde" title="Preisrunde" panel={<BulkPanel />} />
         <Tab id="saetze" title="Sätze" panel={<RatesPanel />} />
       </Tabs>
@@ -345,11 +347,13 @@ interface Product {
   id: string; sku: string; name: string; short: string; brand: string; cat: string; colour: string;
   blurb: string; eur_m2: number; eur_m2_thk: Record<string, number> | null; thicknesses: number[];
   sheets: number[][]; kerf: number | null; web: number | null; min_web: number | null; grain: string;
-  flip_ok: boolean; lead_days: number; url: string; datasheet_url: string; active: boolean; cnc: string;
+  flip_ok: boolean; lead_days: number; min_stock?: number; target_stock?: number; safety_stock?: number;
+  auto_reorder?: string; sku_unit?: string; url: string; datasheet_url: string; active: boolean; cnc: string;
   verified: Record<string, boolean>;
 }
 const FIELDS: Array<keyof Product> = ["name", "short", "brand", "cat", "colour", "blurb", "kerf", "web", "min_web",
-  "grain", "flip_ok", "lead_days", "url", "datasheet_url", "active", "cnc"];
+  "grain", "flip_ok", "lead_days", "min_stock", "target_stock", "safety_stock", "auto_reorder", "sku_unit",
+  "url", "datasheet_url", "active", "cnc"];
 
 function ProductDialog({ id, onClose }: { id: string; onClose: (saved: boolean) => void }) {
   const [orig, setOrig] = useState<Product | null>(null);
@@ -409,6 +413,17 @@ function ProductDialog({ id, onClose }: { id: string; onClose: (saved: boolean) 
             </label>
             <label>Farbe<InputGroup type="color" value={p.colour} onChange={(e) => set({ colour: e.target.value })} /></label>
             <label>Lieferzeit (Tage)<NumericInput fill min={0} max={365} value={p.lead_days} onValueChange={(v) => Number.isFinite(v) && set({ lead_days: v })} /></label>
+            <label>Lagereinheit<InputGroup value={p.sku_unit ?? "Platte"} onChange={(e) => set({ sku_unit: e.target.value })} /></label>
+            <label>Meldebestand (0 = dynamisch)<NumericInput fill min={0} value={p.min_stock ?? 0} onValueChange={(v) => Number.isFinite(v) && set({ min_stock: v })} /></label>
+            <label>Zielbestand (0 = dynamisch)<NumericInput fill min={0} value={p.target_stock ?? 0} onValueChange={(v) => Number.isFinite(v) && set({ target_stock: v })} /></label>
+            <label>Sicherheitsbestand<NumericInput fill min={0} value={p.safety_stock ?? 1} onValueChange={(v) => Number.isFinite(v) && set({ safety_stock: v })} /></label>
+            <label>Auto-Nachschub (Smart-Lager)
+              <HTMLSelect fill value={p.auto_reorder ?? "propose"} onChange={(e) => set({ auto_reorder: e.currentTarget.value })}>
+                <option value="propose">1-Klick Bestellvorschlag (empfohlen)</option>
+                <option value="auto">Vollautomatisch (Auto-PO + Mail-Entwurf)</option>
+                <option value="off">Aus (nur manuell)</option>
+              </HTMLSelect>
+            </label>
             <label>Schnittspalt kerf (mm, leer = Satz)<InputGroup value={p.kerf == null ? "" : String(p.kerf)} onChange={(e) => set({ kerf: num(e.target.value) })} /></label>
             <label>Randabstand web (mm, leer = Satz)<InputGroup value={p.web == null ? "" : String(p.web)} onChange={(e) => set({ web: num(e.target.value) })} /></label>
             <label>Mindeststeg (mm, leer = 10)<InputGroup value={p.min_web == null ? "" : String(p.min_web)} onChange={(e) => set({ min_web: num(e.target.value) })} /></label>

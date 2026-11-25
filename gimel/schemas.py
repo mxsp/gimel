@@ -162,10 +162,23 @@ class ProductBase(BaseModel):
     flip_ok: bool = True
     stock: int = 0
     lead_days: int = 0
+    min_stock: int = Field(default=0, ge=0, le=1_000_000)
+    target_stock: int = Field(default=0, ge=0, le=1_000_000)
+    safety_stock: int = Field(default=1, ge=0, le=1_000_000)
+    auto_reorder: str = "propose"
+    preferred_supplier_id: Optional[int] = None
+    sku_unit: str = Field(default="Platte", max_length=20)
     url: str = ""
     datasheet_url: str = ""
     active: bool = True
     verified: dict[str, bool] = Field(default_factory=dict)
+
+    @field_validator("auto_reorder")
+    @classmethod
+    def _auto_reorder_known(cls, v: str) -> str:
+        if v not in ("propose", "auto", "off"):
+            raise ValueError("auto_reorder muss propose, auto oder off sein.")
+        return v
 
     @field_validator("grain")
     @classmethod
@@ -185,8 +198,19 @@ class ProductBase(BaseModel):
         return v
 
 
-#: Bekannte Gruppen und Schneidbarkeit (seed_data.json "categories", engine CNC).
-PRODUCT_CATS = ("elastomer", "ptfe", "graphit", "faser", "hochtemp")
+#: Bekannte Gruppen und Schneidbarkeit — verallgemeinert für allgemeine Fertigung & Blech-/Plattenzuschnitt.
+PRODUCT_CATS = (
+    "elastomer",
+    "metall",
+    "kunststoff",
+    "faser",
+    "holz",
+    "schaum",
+    "ptfe",
+    "graphit",
+    "hochtemp",
+    "standard",
+)
 PRODUCT_CNC = ("confirmed", "likely", "check")
 
 
@@ -301,10 +325,23 @@ class ProductUpdate(_ProductInputChecks):
     flip_ok: Optional[bool] = None
     stock: Optional[int] = None
     lead_days: Optional[int] = Field(default=None, ge=0, le=365)
+    min_stock: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    target_stock: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    safety_stock: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    auto_reorder: Optional[str] = None
+    preferred_supplier_id: Optional[int] = None
+    sku_unit: Optional[str] = Field(default=None, max_length=20)
     url: Optional[str] = Field(default=None, max_length=400)
     datasheet_url: Optional[str] = Field(default=None, max_length=400)
     active: Optional[bool] = None
     verified: Optional[dict[str, bool]] = None
+
+    @field_validator("auto_reorder")
+    @classmethod
+    def _auto_reorder_known(cls, v):
+        if v is not None and v not in ("propose", "auto", "off"):
+            raise ValueError("auto_reorder muss propose, auto oder off sein.")
+        return v
 
     @field_validator("grain")
     @classmethod
@@ -327,7 +364,16 @@ class ProductUpdate(_ProductInputChecks):
         return v
 
 
-NULLABLE_PRODUCT_FIELDS = ("t_min", "t_max", "t_peak", "p_max", "kerf", "web", "min_web")
+NULLABLE_PRODUCT_FIELDS = (
+    "t_min",
+    "t_max",
+    "t_peak",
+    "p_max",
+    "kerf",
+    "web",
+    "min_web",
+    "preferred_supplier_id",
+)
 
 
 class ProductOut(ProductBase):
@@ -383,6 +429,12 @@ class StockRow(BaseModel):
     last_movement_at: Optional[datetime] = None
     #: Verfügbare Reststücke dieses Werkstoffs (alle Dicken) — zählen nicht als Platten.
     offcuts: int = 0
+    min_stock: int = 0
+    target_stock: int = 0
+    safety_stock: int = 1
+    auto_reorder: str = "propose"
+    preferred_supplier_id: Optional[int] = None
+    sku_unit: str = "Platte"
 
 
 class StockAdjust(BaseModel):

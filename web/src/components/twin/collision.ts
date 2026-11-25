@@ -416,6 +416,44 @@ export function obstacleWallPieces(
   return wallPieces(o.points ?? [], doors, tol);
 }
 
+/** Exakte Türöffnungen auf den Wandsegmenten einer Raumbox oder Innenwand —
+ *  damit in 3D der Wandsturz oberhalb des Türrahmens (frameH → Wandhöhe h)
+ *  bündig geschlossen wird und keine Lücke über der Tür entsteht. */
+export function obstacleDoorOpenings(
+  o: Pick<Obstacle, "points" | "kind" | "name">,
+  doors: (Pick<Door, "x" | "y" | "width"> & Partial<Pick<Door, "kind" | "name">>)[] = [],
+): { a: Pt; b: Pt; kind: string }[] {
+  const pts = o.points ?? [];
+  if (pts.length < 3 || !doors.length) return [];
+  const k = obstacleKind(o);
+  const tol = k === "room" ? 0.42 : 0.5;
+  const openings = doors.filter((d) => isPassableWallOpening(d));
+  const out: { a: Pt; b: Pt; kind: string }[] = [];
+  const at = (a: Pt, ux: number, uy: number, t: number): Pt => [a[0] + ux * t, a[1] + uy * t];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len < 1e-6) continue;
+    const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
+    for (const d of openings) {
+      const dx = d.x - a[0], dy = d.y - a[1];
+      if (Math.abs(dx * uy - dy * ux) > tol) continue;
+      const along = dx * ux + dy * uy;
+      if (along < -0.05 || along > len + 0.05) continue;
+      const half = Math.max(0.25, (Number(d.width) || 1.2) / 2);
+      const lo = Math.max(0, along - half), hi = Math.min(len, along + half);
+      if (hi > lo + 1e-3) {
+        out.push({
+          a: at(a, ux, uy, lo),
+          b: at(a, ux, uy, hi),
+          kind: effectiveDoorKind({ kind: d.kind ?? "door", name: d.name ?? "" }),
+        });
+      }
+    }
+  }
+  return out;
+}
+
 /** Die festen Körper einer Ebene. Wände sind Wandstücke mit kleiner Dicke;
     Zonen sind passiv, damit sie nie als Hindernis gelten. */
 export function buildTwinWorld(floor: Floor, stations: Station[], opts: TwinWorldOptions = {}): CollisionWorld {

@@ -1394,6 +1394,72 @@ def _render_laufkarte_html(
                     }
                 )
 
+    # Smarte Laufkarten-Zusatzdaten: Lagerorte, Reststücke, Chargen (EN 10204) & Team-Notizen
+    from ..models import FactorySetting, MaterialLot, Offcut, StockLocation, TeamNote
+
+    st_names = {s.id: s.label for s in db.query(FactoryStation).all()}
+    loc_rows = db.query(StockLocation).filter(StockLocation.product_id == wo.mat).all()
+    storage_locations = [
+        f"{st_names.get(lr.station_id, 'Lager')}{' · ' + lr.bin if lr.bin else ''} ({lr.qty} Pl.)"
+        for lr in loc_rows
+    ]
+    off_rows = (
+        db.query(Offcut)
+        .filter(Offcut.product_id == wo.mat, Offcut.status == "available")
+        .order_by(Offcut.id.desc())
+        .limit(6)
+        .all()
+    )
+    available_offcuts = [
+        f"{oc.code}: {oc.w:.0f}×{oc.h:.0f}×{oc.thk:g} mm{' (' + oc.bin + ')' if oc.bin else ''}"
+        for oc in off_rows
+    ]
+    lot_rows = (
+        db.query(MaterialLot)
+        .filter(MaterialLot.product_id == wo.mat, MaterialLot.status == "available", MaterialLot.qty_remaining > 0)
+        .order_by(MaterialLot.id.desc())
+        .limit(10)
+        .all()
+    )
+    material_lots = [
+        {
+            "code": lt.code,
+            "label": f"{lt.code} · {lt.thk:g} mm ({lt.qty_remaining} Pl.){' · EN ' + lt.cert_type if lt.cert_type else ''}{' ' + lt.cert_ref if lt.cert_ref else ''}",
+        }
+        for lt in lot_rows
+    ]
+    note_rows = (
+        db.query(TeamNote)
+        .filter(
+            TeamNote.archived.is_(False),
+            TeamNote.entity_id.in_([wo.no, *order_nos]),
+        )
+        .order_by(TeamNote.id.desc())
+        .limit(6)
+        .all()
+    )
+    team_notes = [
+        {
+            "sender": n.sender_name or n.sender_email,
+            "priority": n.priority,
+            "subject": n.subject,
+            "body": n.body or "",
+        }
+        for n in note_rows
+    ]
+
+    state_url = ""
+    note_url = ""
+    if not inline_script:
+        if public_url:
+            state_url = f"{public_url.rstrip('/')}/state"
+            note_url = f"{public_url.rstrip('/')}/note"
+        else:
+            state_url = f"/api/production/work-orders/{wo.no}/traveller-state"
+            note_url = "/api/notes"
+
+    payload["planned_min"] = round(float(wo.planned_min or (wo.n_plates * 16.0)), 1)
+
     return work_order_html(
         payload,
         floor_view.scrub(plates, office),
@@ -1408,6 +1474,12 @@ def _render_laufkarte_html(
         station_label=station_label,
         staged=bool(wo.material_staged_at),
         status=wo.status.value if wo.status else "",
+        storage_locations=storage_locations,
+        available_offcuts=available_offcuts,
+        material_lots=material_lots,
+        team_notes=team_notes,
+        state_url=state_url,
+        note_url=note_url,
     )
 
 
@@ -1652,6 +1724,132 @@ def public_laufkarte_part_dxf(
     resp = _dxf(db, wo, part_dxf(payload, header=header), f"{wo.no}-Pos-{position_id}.dxf")
     resp.headers.update(_PUBLIC_HEADERS)
     return resp
+
+
+# --------------------------------------------------------------------------
+# Smarter Laufschein — Live-Synchronisation (Fortschritt, Stoppuhr, Charge & Notiz)
+# --------------------------------------------------------------------------
+class TravellerStateIn(BaseModel):
+    checked: dict[str, int] = Field(default_factory=dict)
+    elapsed_sec: int = Field(default=0, ge=0, le=1_000_000)
+    selected_lot: str = Field(default="", max_length=40)
+
+
+def _read_traveller_state(db: Session, wo_no: str) -> dict:
+    import json
+    from ..models import FactorySetting
+
+    row = db.get(FactorySetting, f"lk_state:{wo_no}")
+    if not row or not row.value:
+        return {"checked": {}, "elapsed_sec": 0, "selected_lot": "", "updated_at": None}
+    try:
+        data = json.loads(row.value)
+        if isinstance(data, dict):
+            return {
+                "checked": data.get("checked") if isinstance(data.get("checked"), dict) else {},
+                "elapsed_sec": int(data.get("elapsed_sec") or 0),
+                "selected_lot": str(data.get("selected_lot") or ""),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            }
+    except Exception:  # noqa: BLE001
+        pass
+    return {"checked": {}, "elapsed_sec": 0, "selected_lot": "", "updated_at": None}
+
+
+def _write_traveller_state(db: Session, wo_no: str, body: TravellerStateIn, actor: str) -> dict:
+    import json
+    from ..models import FactorySetting
+
+    key = f"lk_state:{wo_no}"
+    clean_checked = {str(k)[:60]: 1 for k, v in (body.checked or {}).items() if v}
+    raw = json.dumps(
+        {
+            "checked": clean_checked,
+            "elapsed_sec": int(body.elapsed_sec or 0),
+            "selected_lot": body.selected_lot.strip()[:40],
+        },
+        separators=(",", ":"),
+    )[:395]
+    row = db.get(FactorySetting, key)
+    if row is None:
+        db.add(FactorySetting(key=key, value=raw, updated_by=actor))
+    else:
+        row.value = raw
+        row.updated_by = actor
+    db.commit()
+    return _read_traveller_state(db, wo_no)
+
+
+@router.get("/work-orders/{no}/traveller-state")
+def get_traveller_state(
+    no: str,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[User, Depends(require_worker)],
+) -> dict:
+    wo = _load_wo(db, no)
+    return _read_traveller_state(db, wo.no)
+
+
+@router.put("/work-orders/{no}/traveller-state")
+def put_traveller_state(
+    no: str,
+    body: TravellerStateIn,
+    db: Annotated[Session, Depends(get_db)],
+    actor: Annotated[User, Depends(require_worker)],
+) -> dict:
+    wo = _load_wo(db, no)
+    return _write_traveller_state(db, wo.no, body, actor.email)
+
+
+@public_router.get("/laufkarte/{token}/state", include_in_schema=False)
+def get_public_laufkarte_state(token: str, db: Annotated[Session, Depends(get_db)]) -> dict:
+    resolved = _resolve_public_wo(db, token)
+    if not resolved:
+        raise HTTPException(404, "Laufkarte nicht freigegeben.")
+    wo, _ = resolved
+    return _read_traveller_state(db, wo.no)
+
+
+@public_router.put("/laufkarte/{token}/state", include_in_schema=False)
+def put_public_laufkarte_state(
+    token: str, body: TravellerStateIn, db: Annotated[Session, Depends(get_db)]
+) -> dict:
+    resolved = _resolve_public_wo(db, token)
+    if not resolved:
+        raise HTTPException(404, "Laufkarte nicht freigegeben.")
+    wo, _ = resolved
+    return _write_traveller_state(db, wo.no, body, "laufkarte-netz")
+
+
+class PublicLaufkarteNoteIn(BaseModel):
+    sender_name: str = Field(default="Werkstatt", max_length=80)
+    body: str = Field(min_length=1, max_length=1500)
+    priority: str = Field(default="important", max_length=16)
+
+
+@public_router.post("/laufkarte/{token}/note", include_in_schema=False)
+def post_public_laufkarte_note(
+    token: str, body: PublicLaufkarteNoteIn, db: Annotated[Session, Depends(get_db)]
+) -> dict:
+    from ..models import TeamNote
+
+    resolved = _resolve_public_wo(db, token)
+    if not resolved:
+        raise HTTPException(404, "Laufkarte nicht freigegeben.")
+    wo, _ = resolved
+    prio = body.priority if body.priority in ("normal", "important", "urgent") else "important"
+    note = TeamNote(
+        sender_name=body.sender_name.strip() or "Werkstatt (Laufkarte)",
+        channel="schicht",
+        priority=prio,
+        subject=f"Rückmeldung zu {wo.no}",
+        body=body.body.strip(),
+        entity_type="work_order",
+        entity_id=wo.no,
+    )
+    db.add(note)
+    db.commit()
+    return {"ok": True, "id": note.id}
 
 
 class StatusChange(BaseModel):

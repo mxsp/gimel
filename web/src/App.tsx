@@ -19,6 +19,7 @@ import DetailSwitch from "./ui/DetailSwitch";
 import { initDetail } from "./ui/detail";
 import { registerCoreFeatures } from "./modules/features";
 import { matchRegisteredFeature } from "./modules/featureRegistry";
+import { TopBarNotesDrawerButton } from "./components/MailAndNotesPanel";
 import UserMenu from "./components/UserMenu";
 import { WORKER_ROUTES } from "./constants";
 import JumpPalette, { JumpTrigger } from "./components/JumpPalette";
@@ -138,6 +139,13 @@ export default function App() {
         <JumpTrigger />
         <span className="gimel-bar-spacer" />
         <DetailSwitch />
+        {role !== "worker" && (
+          <Button className="hide-narrow" minimal icon="envelope" text="Postfach"
+                  active={route.startsWith("postfach")}
+                  title="Postfach & Copilot-Mail öffnen (g m)"
+                  onClick={() => navigate("postfach")} />
+        )}
+        <TopBarNotesDrawerButton />
         {agentEnabled && (
           <Button className="hide-narrow" minimal icon="chat" text="Assistent" active={copilot.open}
                   title="Assistent ein-/ausblenden (Strg+Shift+A)" aria-label="Assistent ein- oder ausblenden"

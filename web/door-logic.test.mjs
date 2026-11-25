@@ -70,6 +70,9 @@ const roomObs = {
 };
 const roomDoor = { name: "Bürotür", x: 7, y: 4, width: 1.2, kind: "door" };
 assert.equal(c.obstacleHasDoor(roomObs, [roomDoor]), true);
+const roomOpenings = c.obstacleDoorOpenings(roomObs, [roomDoor]);
+assert.equal(roomOpenings.length, 1, "Genau eine Türöffnung für den Wandsturz erkannt");
+assert.ok(Math.abs(Math.hypot(roomOpenings[0].b[0] - roomOpenings[0].a[0], roomOpenings[0].b[1] - roomOpenings[0].a[1]) - 1.2) < 1e-6);
 const roomFloor = { ...floor, obstacles: [roomObs], doors: [roomDoor] };
 const roomWorld = c.buildTwinWorld(roomFloor, [], { openDoors: true });
 // Durch die Bürotür bei (7, 4) hindurch ins Innere (7, 5.5) darf keine Kollision blockieren!

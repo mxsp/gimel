@@ -4594,6 +4594,11 @@ from .sandbox_tools import SANDBOX_SPECS  # noqa: E402
 
 TOOL_SPECS.extend(SANDBOX_SPECS)
 
+# Lieferkette (Auto-Lieferant & Smart-Lager), E-Mail-Zentrale, Kollegen-Notizen & Kalender.
+from .erp_collab_tools import ERP_COLLAB_SPECS  # noqa: E402
+
+TOOL_SPECS.extend(ERP_COLLAB_SPECS)
+
 TOOLS: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
 # Rückwärtskompatible Aufruf-Aliase (nur ein Schema in TOOL_SPECS, spart Modell-Budget).
 for _alias_name, _alias_fn in (

@@ -399,6 +399,12 @@ def work_order_html(
     station_label: str = "",
     staged: bool = False,
     status: str = "",
+    storage_locations: Sequence[str] = (),
+    available_offcuts: Sequence[str] = (),
+    material_lots: Sequence[dict] = (),
+    team_notes: Sequence[dict] = (),
+    state_url: str = "",
+    note_url: str = "",
 ) -> str:
     """Die Laufkarte — digital am Arbeitsplatz/Tablet und sauber druckbar auf A4.
 
@@ -468,14 +474,18 @@ def work_order_html(
             f' <a class="dxf-link no-print" href="{_esc(dxf_base)}/plate/{pidx}.dxf" download>Platte DXF</a>'
             if dxf_base else ""
         )
+        batch_chk = (
+            f' <button type="button" class="lk-btn no-print" data-lk-check-plate="{pidx}" '
+            f'style="padding:2px 8px;font-size:11px">Alle Marken ✓</button>'
+        )
         cust_th = "<th>Kunde</th>" if office else ""
         plates_html_parts.append(f"""
-      <section class="plate" id="platte-{pidx + 1}">
+      <section class="plate" id="platte-{pidx + 1}" data-plate-idx="{pidx}">
         <div class="plate-head">
           <div>
             <h2>Platte {pidx + 1} von {len(plates)}
               <span class="plate-fmt">{fmt[0]:.0f} × {fmt[1]:.0f} mm</span>
-              <span class="sub">{len(placements)} Teile · Ausnutzung {pct_val:.0f} % · {cut_to}</span>{plate_dxf}</h2>
+              <span class="sub">{len(placements)} Teile · Ausnutzung {pct_val:.0f} % · {cut_to}</span>{plate_dxf}{batch_chk}</h2>
             <div class="util-bar"><i style="width:{max(4, pct_val):.0f}%"></i></div>
           </div>
           <div class="plate-qr" title="Scan Platte {pidx + 1}">{plate_qr}</div>
@@ -780,6 +790,48 @@ def work_order_html(
 
     reload_btn = '<button type="button" class="lk-btn" data-lk-reload>Aktualisieren</button>' if public_url else ""
 
+    planned_min = float(wo.get("planned_min") or (int(wo.get("n_plates", 1)) * 16.0))
+    loc_text = " · ".join(storage_locations) if storage_locations else "Standardlager (kein festes Fach)"
+    off_text = " · ".join(available_offcuts) if available_offcuts else "keine offenen Reststücke gemeldet"
+    lot_opts = '<option value="">— Charge am Regal wählen —</option>' + "".join(
+        f'<option value="{_esc(lt.get("code", ""))}">{_esc(lt.get("label", lt.get("code", "")))}</option>'
+        for lt in material_lots
+    )
+    smart_supply_html = f"""
+  <div class="smart-box">
+    <div class="smart-grid">
+      <div><span class="smart-kicker">Lagerort (Entnahme)</span><b>{_esc(loc_text)}</b></div>
+      <div><span class="smart-kicker">Verfügbare Reststücke zuerst prüfen</span><b>{_esc(off_text)}</b></div>
+      <div class="no-print"><span class="smart-kicker">Verwendete Materialcharge (EN 10204)</span>
+        <select class="lk-select" data-lk-lot aria-label="Materialcharge auswählen">{lot_opts}</select>
+      </div>
+    </div>
+  </div>"""
+
+    notes_items_html = "".join(
+        f'<li class="lk-note-item{" is-urgent" if n.get("priority") == "urgent" else ""}">'
+        f'<b>{_esc(n.get("sender", "Team"))}{" · " + _esc(n.get("subject", "")) if n.get("subject") else ""}:</b> '
+        f'{_esc(n.get("body", ""))}</li>'
+        for n in team_notes
+    )
+    notes_composer_html = (
+        f'<div class="lk-note-form no-print">'
+        f'<input type="text" class="lk-input" data-lk-note-input placeholder="Kurze Rückmeldung / Übergabenotiz an Büro &amp; Schicht zu {_esc(wo["no"])} …" aria-label="Notiz an Kollegen">'
+        f'<button type="button" class="lk-btn" data-lk-note-send>Notiz senden</button>'
+        f'<span class="sub" data-lk-note-status></span>'
+        f'</div>'
+        if note_url else ""
+    )
+    empty_note_li = '<li class="sub">Keine offenen Übergabenotizen.</li>'
+    smart_notes_html = (
+        f'<div class="smart-notes">'
+        f'<div class="smart-kicker">Team- &amp; Schichtnotizen zu {_esc(wo["no"])}</div>'
+        f'<ul class="lk-note-list" data-lk-note-list>{notes_items_html or empty_note_li}</ul>'
+        f'{notes_composer_html}'
+        f'</div>'
+        if (team_notes or note_url) else ""
+    )
+
     return f"""<!doctype html>
 <html lang="de"><head><meta charset="utf-8">
 <title>Laufkarte {_esc(wo["no"])}</title>
@@ -818,6 +870,18 @@ def work_order_html(
   .lk-btn:hover {{ background: #f3f4f6; }}
   .lk-btn.primary {{ background: #14532d; border-color: #14532d; color: #fff; }}
   .lk-btn.primary:hover {{ background: #166534; }}
+  .lk-input, .lk-select {{ border: 1px solid #cfd5dd; border-radius: 4px; padding: 4px 8px; font: 12px/1.4 inherit; background: #fff; color: {INK}; }}
+  .lk-timer {{ font-family: ui-monospace, monospace; font-size: 11.5px; font-weight: 700; padding: 3px 8px; border-radius: 4px; background: #eef6fb; border: 1px solid #cfeaf6; color: #055f80; }}
+  .smart-box {{ margin: 10px 0; padding: 10px 12px; background: #f8fafc; border: 1px solid #dbe3ec; border-radius: 5px; font-size: 12px; }}
+  .smart-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; align-items: center; }}
+  .smart-kicker {{ display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: {MUTED}; margin-bottom: 2px; }}
+  .smart-notes {{ margin: 10px 0; padding: 10px 12px; background: #fffdf5; border: 1px solid #f3e3b2; border-radius: 5px; font-size: 12px; }}
+  .lk-note-list {{ list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }}
+  .lk-note-item {{ padding: 4px 6px; background: #fff; border-radius: 4px; border: 1px solid #efe6c8; }}
+  .lk-note-item.is-urgent {{ border-left: 3px solid #c23030; }}
+  .lk-note-form {{ display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; }}
+  .lk-note-form .lk-input {{ flex: 1 1 240px; }}
+  .marken-row.is-filtered-out {{ display: none; }}
 
   .sheet {{ max-width: 980px; margin: 0 auto 16px; background: #fff; padding: 20px 24px 18px;
             border: 1px solid #d5d9df; border-radius: 6px; break-inside: avoid; }}
@@ -966,19 +1030,25 @@ def work_order_html(
     .marken-row.is-checked td:not(.chk) {{ opacity: 1; }}
     .no-print {{ display: none !important; }}
   }}
-</style></head><body data-wo="{_esc(wo['no'])}">
+</style></head><body data-wo="{_esc(wo['no'])}" data-state-url="{_esc(state_url)}" data-note-url="{_esc(note_url)}" data-planned-min="{planned_min:.0f}">
 <header class="lk-bar no-print" aria-label="Digitale Laufkarte">
   <div class="lk-bar-inner">
     <div class="lk-bar-left">
       <span class="lk-bar-no">{_esc(wo["no"])}</span>
       {"".join(badges_html)}
+      <span class="lk-timer" title="Ist-Zeit / Soll-Vorgabe">
+        <span data-lk-timer>00:00</span> / {planned_min:.0f}m
+      </span>
+      <button type="button" class="lk-btn" data-lk-timer-toggle>▶ Start</button>
     </div>
     <nav class="lk-nav" aria-label="Abschnitte">{"".join(nav_links)}</nav>
     <div class="lk-bar-right">
+      <input type="search" class="lk-input" style="width:148px" data-lk-filter placeholder="Marke / Auftrag filtern…" aria-label="Marken filtern">
       <span class="lk-prog">
         <span data-lk-progress></span>
         <span class="lk-prog-track"><i class="lk-prog-fill" data-lk-progress-fill></i></span>
       </span>
+      <span class="sub" data-lk-sync-state></span>
       <button type="button" class="lk-btn" data-lk-reset hidden>Zurücksetzen</button>
       {reload_btn}
       <button type="button" class="lk-btn primary" data-lk-print>Drucken</button>
@@ -1005,6 +1075,8 @@ def work_order_html(
     {head_cell("Ausnutzung", f"{wo.get('utilisation', 0) * 100:.0f} %")}
     {due_cell if due_str else head_cell("Station", station_label or "offen")}
   </div>
+  {smart_supply_html}
+  {smart_notes_html}
   <div class="note"><b>Jedes Teil trägt eine Marke.</b> Die Marke steht in der Zeichnung an der
     Stelle des Teils und in der Tabelle darunter{" mit Auftragsnummer und Kunde" if office else " mit Auftragsnummer"}. Teile nach dem
     Schnitt nach Marke ablegen — die Sammelplatte enthält Teile mehrerer Kundenaufträge. Grün = Restfläche (kein Material), blau = Platte.</div>

@@ -375,6 +375,8 @@ def revert(db: Session, change: AgentChange, user: User) -> AgentChange:
     else:
         from gimel.models import (
             BatchPolicy,
+            CalendarEvent,
+            MailMessage,
             MaterialLot,
             PurchaseOrder,
             Rate,
@@ -383,6 +385,7 @@ def revert(db: Session, change: AgentChange, user: User) -> AgentChange:
             Supplier,
             SupplierMaterial,
             SupplyAlert,
+            TeamNote,
         )
 
         model = {
@@ -405,6 +408,9 @@ def revert(db: Session, change: AgentChange, user: User) -> AgentChange:
             "scrap_event": ScrapEvent,
             "station_downtime": StationDowntime,
             "supply_alert": SupplyAlert,
+            "calendar_event": CalendarEvent,
+            "team_note": TeamNote,
+            "mail_message": MailMessage,
         }.get(entity)
         if model is None:
             raise RevertConflict(f"Für {entity} gibt es keine Rücknahme.")

@@ -123,10 +123,22 @@ const SOURCE: Record<string, { label: string; intent: any }> = {
   ki: { label: "KI", intent: "warning" },
   lib: { label: "Bibliothek", intent: "primary" },
   frei: { label: "frei", intent: "danger" },
+  rect: { label: "Rechteck", intent: "primary" },
+  disc: { label: "Scheibe", intent: "none" },
   hand: { label: "Hand", intent: "none" },
 };
 
 let nextLineId = 1;
+
+function buildRectShape(w: number, h: number): Record<string, unknown> {
+  const bw = Math.max(1, w);
+  const bh = Math.max(1, h);
+  return {
+    type: "poly",
+    outer: [[0, 0], [bw, 0], [bw, bh], [0, bh]],
+    holes: [],
+  };
+}
 
 const baseLine = (): DeskLine => ({
   id: nextLineId++, kind: "gasket", label: "", desc: "", external_note: "", price_gross: 0,
@@ -136,6 +148,15 @@ const baseLine = (): DeskLine => ({
 
 const emptyLine = (mat: string): DeskLine =>
   ({ ...baseLine(), label: "Ring", mat, od: 100, di: 50 });
+
+const rectLine = (mat: string): DeskLine =>
+  ({
+    ...baseLine(), label: "Zuschnitt", mat, od: 200, di: 120,
+    cut_len: 640, fmt: [200, 120], shape: buildRectShape(200, 120), source: "rect",
+  });
+
+const discLine = (mat: string): DeskLine =>
+  ({ ...baseLine(), label: "Scheibe", mat, od: 120, di: 0, source: "disc" });
 
 /* Eine freie Position: Sonderfertigung, Zukauf, Handarbeit. Sie hat keine
    Geometrie, die der Nester schachteln könnte — der Erfasser setzt den
@@ -402,7 +423,18 @@ export default function OrderDesk() {
   }]);
 
   const updateLine = (id: number, patch: Partial<DeskLine>) =>
-    setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+    setLines((ls) => ls.map((l) => {
+      if (l.id !== id) return l;
+      const next = { ...l, ...patch };
+      if (next.source === "rect" && (patch.od !== undefined || patch.di !== undefined)) {
+        const w = Math.max(1, Number(next.od) || 1);
+        const h = Math.max(1, Number(next.di) || 1);
+        next.fmt = [w, h];
+        next.cut_len = 2 * (w + h);
+        next.shape = buildRectShape(w, h);
+      }
+      return next;
+    }));
 
   const updateLineBolts = (l: DeskLine, patch: Partial<Pick<DeskLine, "bn" | "bd" | "bc">>) => {
     const nextBn = Math.max(0, Math.min(200, Math.round(patch.bn ?? l.bn)));
@@ -810,6 +842,14 @@ export default function OrderDesk() {
                 loading={aiBusy} disabled={!materials.length}>
           PDF / Zeichnung mit KI auswerten
         </Button>}
+        <Button icon="rectangle" onClick={() => setLines((ls) => [...ls, rectLine(defaultMat())])}
+                disabled={!materials.length}>
+          Rechteck / Zuschnitt
+        </Button>
+        <Button icon="full-circle" onClick={() => setLines((ls) => [...ls, discLine(defaultMat())])}
+                disabled={!materials.length}>
+          Scheibe / Ronde
+        </Button>
         <Button icon="add" onClick={() => setLines((ls) => [...ls, emptyLine(defaultMat())])}
                 disabled={!materials.length}>
           Ring von Hand

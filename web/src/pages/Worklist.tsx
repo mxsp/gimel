@@ -16,6 +16,7 @@ import {
   PageFrame, StatusChip, Toolbar, useDetail,
 } from "../ui";
 import StationControlBar from "../components/StationControlBar";
+import ProductionFlowGraph from "../components/ProductionFlowGraph";
 import { publishStations } from "../stationStore";
 
 /* Arbeitsvorrat — was die Halle zu tun hat, und wer es tut.
@@ -53,6 +54,7 @@ export default function Worklist() {
   const [onlyBusy, setOnlyBusy] = useState(true);
   const [areaFilter, setAreaFilter] = useState<"all" | "production" | "logistics" | "office">("all");
   const [focusedStation, setFocusedStation] = useState<number | null>(null);
+  const [showFlow, setShowFlow] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
 
   const toggleStation = (id: number) => setCollapsed((prev) => {
@@ -263,6 +265,10 @@ export default function Worklist() {
       title="Arbeitsvorrat"
       sub="Jede Station eine Abarbeitungsliste — Reihenfolge nach Zusage, Eil und Liegezeit."
       actions={<>
+        <Button small minimal active={showFlow} icon="flow-branch" text="Produktionsfluss"
+                aria-pressed={showFlow}
+                title="Produktionsfluss-Graph ein- oder ausblenden"
+                onClick={() => setShowFlow((v) => !v)} />
         <Button small minimal active={auto} icon="automatic-updates"
                 aria-pressed={auto}
                 aria-label={auto ? "Auto-Refresh (30 s) aktiv" : "Auto-Refresh pausiert"}
@@ -282,6 +288,16 @@ export default function Worklist() {
       </>}
     >
       <StationControlBar active="arbeitsvorrat" />
+      {showFlow && (
+        <ProductionFlowGraph
+          worklist={data}
+          onSelectStation={(id) => {
+            setOnlyBusy(false);
+            setAreaFilter("all");
+            setFocusedStation(id);
+          }}
+        />
+      )}
       <div className="ui-facts ls-facts" role="group" aria-label="Arbeitsvorrat in Zahlen">
         <div className="ui-fact is-accent">
           <span className="ui-fact-label">Offene Aufgaben</span>

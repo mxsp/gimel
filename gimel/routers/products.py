@@ -360,6 +360,12 @@ def matrix(db: Annotated[Session, Depends(get_db)],
             "eur_m2_thk": r.eur_m2_thk or {},
             "sheets": r.sheets or [], "thicknesses": r.thicknesses or [],
             "stock": r.stock, "lead_days": r.lead_days, "active": r.active,
+            "min_stock": int(getattr(r, "min_stock", 0) or 0),
+            "target_stock": int(getattr(r, "target_stock", 0) or 0),
+            "safety_stock": int(getattr(r, "safety_stock", 1) or 0),
+            "auto_reorder": getattr(r, "auto_reorder", "propose") or "propose",
+            "preferred_supplier_id": getattr(r, "preferred_supplier_id", None),
+            "sku_unit": getattr(r, "sku_unit", "Platte") or "Platte",
             "price_verified": bool((r.verified or {}).get("price")),
             # Fläche × Preis je Format — die Zahl, nach der ein Einkäufer fragt.
             # Wo Dickensätze vorliegen, zählt der günstigste (Ab-Preis).

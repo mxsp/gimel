@@ -54,6 +54,13 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         # Mindeststeg im Teil — die Latte für Loch- und Ringstege, nicht der
         # Spannrand der Schachtelung (der bleibt `web`).
         "min_web": "FLOAT",
+        # Smart-Lager & Auto-Lieferant je Werkstoff (allgemeines ERP).
+        "min_stock": "INTEGER DEFAULT 0",
+        "target_stock": "INTEGER DEFAULT 0",
+        "safety_stock": "INTEGER DEFAULT 1",
+        "auto_reorder": "VARCHAR(16) DEFAULT 'propose'",
+        "preferred_supplier_id": "INTEGER",
+        "sku_unit": "VARCHAR(20) DEFAULT 'Platte'",
     },
     "orders": {
         # Auftragsart und verantwortlicher Mitarbeiter eines internen Auftrags.

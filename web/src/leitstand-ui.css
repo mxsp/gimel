@@ -1363,3 +1363,229 @@
   .queue-row { grid-template-columns: 36px minmax(0, 1fr); }
   .queue-side { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; }
 }
+
+/* ==========================================================================
+   Produktionsfluss-Graph (ERP Leitstand)
+   ========================================================================== */
+.pfg-card {
+  background: var(--g-surface);
+  border: 1px solid var(--g-rule);
+  border-radius: var(--g-radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  box-shadow: var(--g-elev-1);
+}
+
+.pfg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.pfg-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pfg-title-wrap h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pfg-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pfg-stage {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--g-surface-2, rgba(127, 138, 152, 0.06));
+  border: 1px solid var(--g-rule-soft, var(--g-rule));
+}
+
+.pfg-svg {
+  display: block;
+  width: 100%;
+  min-width: 680px;
+  height: auto;
+  max-height: 440px;
+  user-select: none;
+}
+
+.pfg-col-bg {
+  fill: var(--g-surface);
+  fill-opacity: 0.45;
+  stroke: var(--g-rule-soft, var(--g-rule));
+  stroke-width: 1;
+}
+
+.pfg-col-label {
+  fill: var(--g-text-2, #6b7280);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.pfg-edge {
+  cursor: pointer;
+  transition: opacity 0.16s ease;
+}
+
+.pfg-edge.is-dim {
+  opacity: 0.16;
+}
+
+.pfg-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+}
+
+.pfg-edge-line {
+  fill: none;
+  stroke-linecap: round;
+  opacity: 0.82;
+  stroke-dasharray: 8 5;
+  animation: pfg-flow 1.8s linear infinite;
+}
+
+.pfg-edge.is-supply .pfg-edge-line {
+  stroke: var(--g-flow-supply, #8e5cb8);
+}
+
+.pfg-edge.is-ship .pfg-edge-line {
+  stroke: var(--g-flow-ship, #217e56);
+}
+
+.pfg-edge.is-active .pfg-edge-line,
+.pfg-edge:hover .pfg-edge-line {
+  opacity: 1;
+}
+
+@keyframes pfg-flow {
+  from { stroke-dashoffset: 26; }
+  to { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pfg-edge-line {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
+.pfg-edge-pill {
+  fill: var(--g-surface);
+  stroke: var(--g-rule);
+  stroke-width: 1;
+}
+
+.pfg-edge-text {
+  fill: var(--g-text-1, #1c2127);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pfg-node {
+  cursor: pointer;
+  transition: opacity 0.16s ease;
+}
+
+.pfg-node.is-dim {
+  opacity: 0.35;
+}
+
+.pfg-node-box {
+  fill: var(--g-surface);
+  stroke: var(--g-rule);
+  stroke-width: 1.2;
+}
+
+.pfg-node:hover .pfg-node-box,
+.pfg-node.is-selected .pfg-node-box {
+  stroke: var(--gimel-accent, #0b7a67);
+  stroke-width: 2;
+}
+
+.pfg-node.is-bottleneck .pfg-node-box {
+  stroke: var(--g-floor-warn, #c4520a);
+  stroke-width: 1.8;
+}
+
+.pfg-node--warehouse .pfg-node-stripe { fill: var(--g-flow-supply, #8e5cb8); }
+.pfg-node--production .pfg-node-stripe { fill: var(--gimel-accent, #0b7a67); }
+.pfg-node--shipping .pfg-node-stripe { fill: var(--g-flow-ship, #217e56); }
+.pfg-node--accounting .pfg-node-stripe { fill: #4f46e5; }
+.pfg-node.is-bottleneck .pfg-node-stripe { fill: var(--g-floor-warn, #c4520a); }
+
+.pfg-node-title {
+  fill: var(--g-text-1, #1c2127);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pfg-node-meta {
+  fill: var(--g-text-2, #5c7080);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pfg-node-bar-bg {
+  fill: var(--g-rule-soft, rgba(127, 138, 152, 0.22));
+}
+
+.pfg-node-bar-fill {
+  fill: var(--gimel-accent, #0b7a67);
+}
+
+.pfg-node.is-bottleneck .pfg-node-bar-fill {
+  fill: var(--g-floor-warn, #c4520a);
+}
+
+.pfg-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--g-surface-2, rgba(127, 138, 152, 0.08));
+  border: 1px solid var(--g-rule);
+  font-size: 12.5px;
+}
+
+.pfg-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pfg-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 16px;
+  color: var(--g-text-2, #5c7080);
+  font-size: 13px;
+}
+
+.pfg-error {
+  color: var(--g-danger-ink, #c23030);
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
