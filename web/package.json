@@ -1,7 +1,7 @@
 {
   "name": "gimel-web",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Internes Portal (Auftragsbüro, Produktion, Versand, Buchhaltung) — React + Blueprint",
   "type": "module",
   "scripts": {

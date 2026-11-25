@@ -11,9 +11,12 @@ without ``agentlab`` simply has no assistant routes and no assistant tables.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Callable
+
+log = logging.getLogger("gimel.agent_bridge")
 
 
 def load() -> tuple[Any | None, Callable[..., dict] | None]:
@@ -25,13 +28,14 @@ def load() -> tuple[Any | None, Callable[..., dict] | None]:
         root = Path(__file__).resolve().parent.parent
         if (root / "agentlab").is_dir() and str(root) not in sys.path:
             sys.path.insert(0, str(root))
-        from agentlab import models as _models  # noqa: F401
         # Importing the models registers the additive agent_* tables with
         # Gimel's metadata before ``init_db`` runs.
         from agentlab import models as _models  # noqa: F401
         from agentlab.router import router
         from agentlab.seed import seed
-    except ImportError:
+    except ImportError as exc:
+        if exc.name != "agentlab":
+            log.warning("Agent Lab konnte nicht geladen werden: %s", exc, exc_info=True)
         return None, None
     return router, seed
 

@@ -231,3 +231,20 @@ def test_sandbox_symlink_nofollow_and_speech_weak_slots(client, tmp_path):
 
     sem = asyncio.run(get_slot())
     assert isinstance(sem, asyncio.Semaphore)
+
+
+def test_sandbox_imports_without_posix_resource(monkeypatch):
+    """Auf Windows gibt es das POSIX-Modul ``resource`` nicht — Agent Lab muss trotzdem laden."""
+    import importlib
+    import sys
+
+    from agentlab import sandbox as sandbox_service
+
+    monkeypatch.setitem(sys.modules, "resource", None)
+    try:
+        reloaded = importlib.reload(sandbox_service)
+        assert reloaded.resource is None
+        assert reloaded._bwrap_preexec(30, 1024 * 1024) is None
+    finally:
+        monkeypatch.undo()
+        importlib.reload(sandbox_service)

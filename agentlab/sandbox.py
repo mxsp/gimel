@@ -19,7 +19,10 @@ from __future__ import annotations
 import atexit
 import os
 import re
-import resource
+try:
+    import resource
+except ImportError:  # Windows hat kein POSIX-resource-Modul (bwrap ist Linux-only)
+    resource = None  # type: ignore[assignment]
 import secrets
 import shutil
 import stat
@@ -1107,7 +1110,12 @@ def _bwrap_preexec(
     memory_mb: int = 512,
     pids_limit: int = MAX_PIDS,
 ) -> Any:
+    if resource is None:
+        return None
+
     def _apply() -> None:
+        if resource is None:
+            return
         try:
             cpu = max(5, timeout_s + 2)
             resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 2))
