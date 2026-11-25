@@ -1,4 +1,4 @@
-import type { Door, Floor, Robot, RobotJob, Station } from "../../factory";
+import { effectiveDoorKind, obstacleKind, type Door, type Floor, type Obstacle, type Robot, type RobotJob, type Station } from "../../factory";
 import { footprint, points3, widthOf } from "./conveyor";
 import { stationCorners } from "../../factory";
 import type { Pt } from "./aisleWays";
@@ -326,29 +326,44 @@ export function clearWays<T extends { points: Pt[] }>(ways: T[], world: Collisio
 }
 
 export interface TwinWorldOptions {
-  /** Türen als Durchgang: die Wand wird an jeder Tür geteilt, statt durchzulaufen.
-      Nur das Begehen braucht das; Anzeige und Roboterprüfung bleiben bei der
-      geschlossenen Wand. */
+  /** Türen als Durchgang: Außenwände, Innenwände und Raumboxen werden an jeder Tür geteilt,
+      damit man hindurchgehen kann. Nur das Begehen braucht das; Anzeige und Roboterprüfung
+      bleiben bei der geschlossenen Wand. */
   openDoors?: boolean;
+  /** Zusätzliche Türen (z. B. von einer direkt angrenzenden Nachbarhalle in lokale Koordinaten projiziert). */
+  extraDoors?: (Pick<Door, "x" | "y" | "width"> & Partial<Pick<Door, "kind" | "name">>)[];
 }
 
-/** Wandstücke eines Umrisses, an Türen geteilt. Eine Tür liegt als Punkt auf
-    der Wand; ihre Breite bestimmt die Öffnung. Türen an anderen Wänden werden
-    über den Abstand zur Wand aussortiert. */
-export function wallPieces(outline: Pt[], doors: Pick<Door, "x" | "y" | "width">[] = []): { a: Pt; b: Pt }[] {
+/** Nur begehbare Wandöffnungen schneiden den Wandsockel auf; Fenster (Brüstung 1 m),
+ *  Treppen und Aufzüge lassen die Außenwand geschlossen. */
+export function isPassableWallOpening(d: Pick<Door, "kind" | "name"> | { kind?: string; name?: string }): boolean {
+  const k = effectiveDoorKind({ kind: d.kind ?? "door", name: d.name ?? "" });
+  return k !== "window" && k !== "stair" && k !== "lift";
+}
+
+/** Wandstücke eines Umrisses (oder Innenraums / einer Innenwand), an begehbaren
+    Türen/Toren geteilt. ``perpTol`` erlaubt bei dünnen Innenwänden (0,2–0,3 m)
+    den Durchbruch durch beide gegenüberliegenden Wandseiten. */
+export function wallPieces(
+  outline: Pt[],
+  doors: (Pick<Door, "x" | "y" | "width"> & Partial<Pick<Door, "kind" | "name">>)[] = [],
+  perpTol = 0.38,
+): { a: Pt; b: Pt }[] {
   const out: { a: Pt; b: Pt }[] = [];
   const at = (a: Pt, ux: number, uy: number, t: number): Pt => [a[0] + ux * t, a[1] + uy * t];
+  const openings = doors.filter((d) => isPassableWallOpening(d));
   for (let i = 0; i < outline.length; i++) {
     const a = outline[i], b = outline[(i + 1) % outline.length];
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (len < 1e-6) continue;
     const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
     const cuts: [number, number][] = [];
-    for (const d of doors) {
+    for (const d of openings) {
       const dx = d.x - a[0], dy = d.y - a[1];
-      // Nur Türen auf dieser Wand: Abstand zur Wand, nicht zur Verlängerung.
-      if (Math.abs(dx * uy - dy * ux) > 0.75) continue;
+      // Nur Türen direkt auf dieser Wand (Abstand <= perpTol und Mitte innerhalb des Segments).
+      if (Math.abs(dx * uy - dy * ux) > perpTol) continue;
       const along = dx * ux + dy * uy;
+      if (along < -0.05 || along > len + 0.05) continue;
       const half = Math.max(0.25, (Number(d.width) || 1.2) / 2);
       const lo = Math.max(0, along - half), hi = Math.min(len, along + half);
       if (hi > lo + 1e-3) cuts.push([lo, hi]);
@@ -365,10 +380,47 @@ export function wallPieces(outline: Pt[], doors: Pick<Door, "x" | "y" | "width">
   return out;
 }
 
+/** Prüft, ob ein Hindernis (Innenwand, Trennwand oder Raumbox) eine Tür trägt. */
+export function obstacleHasDoor(
+  o: Pick<Obstacle, "points" | "kind" | "name">,
+  doors: (Pick<Door, "x" | "y" | "width"> & Partial<Pick<Door, "kind" | "name">>)[] = [],
+): boolean {
+  if (!o.points || o.points.length < 3 || !doors.length) return false;
+  const k = obstacleKind(o);
+  if (k !== "wall" && k !== "partition" && k !== "room") return false;
+  const openings = doors.filter((d) => isPassableWallOpening(d));
+  if (!openings.length) return false;
+  const tol = k === "room" ? 0.42 : 0.5;
+  for (let i = 0; i < o.points.length; i++) {
+    const a = o.points[i], b = o.points[(i + 1) % o.points.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len < 0.4) continue;
+    const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
+    for (const d of openings) {
+      const dx = d.x - a[0], dy = d.y - a[1];
+      if (Math.abs(dx * uy - dy * ux) > tol) continue;
+      const along = dx * ux + dy * uy;
+      if (along >= -0.05 && along <= len + 0.05) return true;
+    }
+  }
+  return false;
+}
+
+/** Wandstücke einer Raumbox oder Innenwand mit Türöffnungen. */
+export function obstacleWallPieces(
+  o: Pick<Obstacle, "points" | "kind" | "name">,
+  doors: (Pick<Door, "x" | "y" | "width"> & Partial<Pick<Door, "kind" | "name">>)[] = [],
+): { a: Pt; b: Pt }[] {
+  const k = obstacleKind(o);
+  const tol = k === "room" ? 0.42 : 0.5;
+  return wallPieces(o.points ?? [], doors, tol);
+}
+
 /** Die festen Körper einer Ebene. Wände sind Wandstücke mit kleiner Dicke;
     Zonen sind passiv, damit sie nie als Hindernis gelten. */
 export function buildTwinWorld(floor: Floor, stations: Station[], opts: TwinWorldOptions = {}): CollisionWorld {
   const colliders: Collider[] = [];
+  const allDoors = [...(floor.doors ?? []), ...(opts.extraDoors ?? [])];
   for (const s of stations) {
     if (s.id == null) continue;
     colliders.push({
@@ -377,7 +429,21 @@ export function buildTwinWorld(floor: Floor, stations: Station[], opts: TwinWorl
     });
   }
   (floor.obstacles ?? []).forEach((o, i) => {
-    if (o.points?.length >= 3) colliders.push({
+    if (!(o.points?.length >= 3)) return;
+    if (opts.openDoors && obstacleHasDoor(o, allDoors)) {
+      const pieces = obstacleWallPieces(o, allDoors);
+      pieces.forEach(({ a, b }, k) => {
+        if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-6) return;
+        colliders.push({
+          id: `obstacle:${i}:wall:${k}`,
+          label: o.name || `Hindernis ${i + 1}`,
+          group: "obstacle",
+          shape: { kind: "segment", a, b, r: 0.08 },
+        });
+      });
+      return;
+    }
+    colliders.push({
       id: `obstacle:${i}`, label: o.name || `Hindernis ${i + 1}`, group: "obstacle",
       shape: { kind: "polygon", points: o.points },
     });
@@ -390,7 +456,7 @@ export function buildTwinWorld(floor: Floor, stations: Station[], opts: TwinWorl
     }));
   });
   const outline = floor.outline ?? [];
-  const walls = opts.openDoors ? wallPieces(outline, floor.doors ?? []) : wallPieces(outline);
+  const walls = opts.openDoors ? wallPieces(outline, allDoors) : wallPieces(outline);
   walls.forEach(({ a, b }, i) => {
     if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-6) return;
     colliders.push({

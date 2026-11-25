@@ -7,8 +7,8 @@ import { navigate } from "../router";
 import { toastError, toastInfo, toastSuccess } from "../toast";
 import FloorPlan, { type ReferenceLevel } from "../components/FloorPlan";
 import {
-  aisleAttach, aisleComponents, aisleStub, Aisles, buildPresetPolygon, circleDimensions, cleanAisles, connectStation, effectiveDoorKind, manualAttach, ManualPath, Pathfinder,
-  polylineLength, proposeConnection, rectDimensions, resizeCirclePolygon, resizeRectPolygon, rotatePolygon, simplifyPolyline, ALL_TYPES, BLANK_STATION, COLOUR_PALETTE, copyToClipboard, Door,
+  aisleAttach, aisleComponents, aisleStub, Aisles, buildPresetPolygon, circleDimensions, cleanAisles, connectStation, defaultDoorWidth, effectiveDoorKind, manualAttach, ManualPath, Pathfinder,
+  polylineLength, proposeConnection, rectDimensions, resizeCirclePolygon, resizeRectPolygon, rotatePolygon, simplifyPolyline, snapDoorToWall, ALL_TYPES, BLANK_STATION, COLOUR_PALETTE, copyToClipboard, Door,
   DOOR_KINDS, EMPTY_FLOOR, Floor, FloorLayer, LAYER_LABEL, MACHINE_LABEL,
   MACHINE_PRESET, MachineKind, missingMachineData, Obstacle, obstacleHeight, obstacleKind, polygonArea,
   polygonCentroid, polygonPerimeter, polygonSelfIntersects, Product, ROUTING_HELP, ROUTING_LABEL,
@@ -586,14 +586,33 @@ export default function FloorAdmin({
   const editDoor = (i: number) => {
     const d = floor.doors?.[i];
     if (!d) return;
-    setLayer("door");
-    setMode("draw");
     setDoorIdx(i);
     setDoorKind(effectiveDoorKind(d));
+    setSelectedId(null);
   };
 
-  const patchDoor = (i: number, patch: Partial<Door>) =>
-    mutate({ doors: (floor.doors ?? []).map((d, k) => (k === i ? { ...d, ...patch } : d)) });
+  const patchDoor = (i: number, patch: Partial<Door>) => {
+    mutate({
+      doors: (floor.doors ?? []).map((d, k) => {
+        if (k !== i) return d;
+        const oldKind = effectiveDoorKind(d);
+        const nextKind = patch.kind ? effectiveDoorKind({ kind: patch.kind, name: patch.name ?? d.name }) : oldKind;
+        let nextWidth = patch.width ?? d.width;
+        if (patch.kind && patch.width === undefined && Math.abs((d.width || 0) - defaultDoorWidth(oldKind)) < 0.05) {
+          nextWidth = defaultDoorWidth(nextKind);
+        }
+        const merged: Door = { ...d, ...patch, width: nextWidth };
+        if (patch.width !== undefined || patch.kind !== undefined) {
+          const snapped = snapDoorToWall(floorRef.current, [merged.x, merged.y], nextKind, nextWidth);
+          if (snapped.snapped) {
+            merged.x = snapped.point[0];
+            merged.y = snapped.point[1];
+          }
+        }
+        return merged;
+      }),
+    });
+  };
 
   // ---------------------------------------------------------------- Speichern
   const dirty = useMemo(
@@ -1213,32 +1232,63 @@ export default function FloorAdmin({
             ))}
           </ButtonGroup>
           <span className="sep" />
-          <Button small intent="primary" icon="office" text="Hallen-Assistent" onClick={() => setCreatorOpen(true)}
-            title="Komplette Halle mit Form, Maßen, Gängen, Toren, Zonen & Stationen erstellen" />
-          <Button small icon="layout-grid" text="Hallenvorlage" onClick={() => setTemplateOpen(true)} />
-          <Button small icon="import" text="DXF" onClick={() => setDxfOpen(true)}
-            title="Umriss aus einer CAD-Zeichnung (ASCII-DXF) übernehmen" />
-        </div>
-
-        {/* Architektur- & Bauteile-Leiste: Wände, Stützen, Zäune, Türen, Tore, Treppen, Aufzüge */}
-        <div className="editor-framework-bar" role="toolbar" aria-label="Bauteile und Zugänge">
-          <div className="editor-fw-group">
-            <span className="editor-fw-label">Struktur:</span>
-            {STRUCTURAL_PRESETS.map((preset) => (
-              <Button key={preset.id} small minimal icon={preset.icon} text={preset.label}
-                title={preset.hint}
-                onClick={() => addStructuralPreset(preset)} />
-            ))}
-          </div>
-          <div className="editor-fw-group">
-            <span className="editor-fw-label">Zugänge:</span>
-            {DOOR_KINDS.map((k) => (
-              <Button key={k.id} small minimal icon={k.icon} text={k.label}
-                active={mode === "draw" && layer === "door" && doorKind === k.id}
-                title={`${k.label} (${k.width} m) — anklicken und auf eine Wand im Plan setzen`}
-                onClick={() => startDoorKind(k.id)} />
-            ))}
-          </div>
+          <KeyPopover placement="bottom-start" content={
+            <Menu>
+              {STRUCTURAL_PRESETS.map((preset) => (
+                <MenuItem
+                  key={preset.id}
+                  icon={preset.icon}
+                  text={preset.label}
+                  title={preset.hint}
+                  onClick={() => addStructuralPreset(preset)}
+                />
+              ))}
+            </Menu>
+          }>
+            <Button small icon="cube" rightIcon="caret-down" text="Struktur"
+              title="Bauteile einfügen (Bohrung, Aussparung, Innenwand, Stütze, Regalblock …)" />
+          </KeyPopover>
+          <KeyPopover placement="bottom-start" content={
+            <Menu>
+              {DOOR_KINDS.map((k) => (
+                <MenuItem
+                  key={k.id}
+                  icon={k.icon}
+                  text={k.label}
+                  label={`${k.width} m`}
+                  active={mode === "draw" && layer === "door" && doorKind === k.id}
+                  title={`${k.label} (${k.width} m) — anklicken und auf eine Wand im Plan setzen`}
+                  onClick={() => startDoorKind(k.id)}
+                />
+              ))}
+            </Menu>
+          }>
+            <Button
+              small
+              icon="log-in"
+              rightIcon="caret-down"
+              active={mode === "draw" && layer === "door"}
+              text={mode === "draw" && layer === "door"
+                ? (DOOR_KINDS.find((k) => k.id === doorKind)?.label ?? "Zugänge")
+                : "Zugänge"}
+              title="Türen, Hallentore, Laderampen, Treppen, Aufzüge, Notausgänge & Fensterbänder setzen"
+            />
+          </KeyPopover>
+          <KeyPopover placement="bottom-end" content={
+            <Menu>
+              <MenuItem icon="office" text="Hallen-Assistent"
+                title="Komplette Halle mit Form, Maßen, Gängen, Toren, Zonen & Stationen erstellen"
+                onClick={() => setCreatorOpen(true)} />
+              <MenuItem icon="layout-grid" text="Hallenvorlage"
+                onClick={() => setTemplateOpen(true)} />
+              <MenuItem icon="import" text="DXF importieren"
+                title="Umriss aus einer CAD-Zeichnung (ASCII-DXF) übernehmen"
+                onClick={() => setDxfOpen(true)} />
+            </Menu>
+          }>
+            <Button small intent="primary" icon="office" rightIcon="caret-down" text="Vorlagen"
+              title="Hallen-Assistent, Hallenvorlage oder DXF-Umriss laden" />
+          </KeyPopover>
         </div>
       </div>}
 
@@ -1394,6 +1444,26 @@ export default function FloorAdmin({
         {phone ? (
           <HallSummary floor={floor} stations={stations} selectedId={selectedId} onPick={selectStation} />
         ) : <div className="editor-rail">
+            {mode === "select" && doorIdx != null && floor.doors?.[doorIdx] && (
+              <Card className="draw-card">
+                <div className="card-title-row">
+                  <h2 className="card-title">Zugang bearbeiten</h2>
+                  <Button small minimal icon="cross" aria-label="Auswahl aufheben" onClick={() => setDoorIdx(null)} />
+                </div>
+                <div className="draw-door-edit">
+                  <InputGroup className="draw-name" aria-label="Name des Zugangs" value={floor.doors[doorIdx].name}
+                    onChange={(e) => patchDoor(doorIdx, { name: e.target.value })} placeholder="Name" />
+                  <HTMLSelect aria-label="Art des Zugangs" value={effectiveDoorKind(floor.doors[doorIdx])}
+                    onChange={(e) => patchDoor(doorIdx, { kind: e.currentTarget.value })}>
+                    {DOOR_KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
+                  </HTMLSelect>
+                  <NumericInput className="draw-num" aria-label="Breite (m)" value={floor.doors[doorIdx].width} min={0.5} stepSize={0.25}
+                    onValueChange={(v) => { if (Number.isFinite(v)) patchDoor(doorIdx, { width: Math.max(0.5, v) }); }} />
+                  <Button small intent="danger" icon="trash" text="Löschen"
+                    onClick={() => { mutate({ doors: floor.doors.filter((_, i) => i !== doorIdx) }); setDoorIdx(null); }} />
+                </div>
+              </Card>
+            )}
             {mode !== "select" && mode !== "measure" && (() => {
               const selfInt = polygonLayer && draftClosed && draft.length >= 4 && polygonSelfIntersects(draft);
               const rectInfo = polygonLayer ? rectDimensions(draft) : null;

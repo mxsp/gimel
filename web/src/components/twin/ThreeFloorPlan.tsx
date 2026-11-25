@@ -30,8 +30,8 @@ import { buildRobotModel, robotStatusColour } from "./robotModel";
 import { SIM_STATE_WORD, SimSegment, SimState, trackPose } from "./fleetSim";
 import { robotMovingAt, robotPoseAt } from "./robots";
 import { AISLE_LANE_M, aisleNetworkMetres, aisleWays, hallHeight, lanePolygon, wayArrows } from "./aisleWays";
-import { buildTwinWorld, CLEARANCE_M, clearPolyline, clearWays, pointInPolygon, robotCollisionReport, ROBOT_RADIUS_M, wallPieces } from "./collision";
-import { hallAt, hallWalkWorld, inversePlacement, nearestHallDoor, unplacePoint, unplaceYaw, type HallPlacement } from "./walkHalls";
+import { buildTwinWorld, CLEARANCE_M, clearPolyline, clearWays, obstacleHasDoor, obstacleWallPieces, pointInPolygon, robotCollisionReport, ROBOT_RADIUS_M, wallPieces } from "./collision";
+import { hallAt, hallWalkWorld, inversePlacement, nearestHallDoor, sharedBoundaryDoors, unplacePoint, unplaceYaw, type HallPlacement } from "./walkHalls";
 import { enableHighQuality, FrameWatch, HighQuality, probeDevice, Quality } from "./renderQuality";
 import {
   cameraKey, classifyDevice, decideFrame, MOVING_RATIO_FACTOR, pixelRatioFor, SETTLE_FRAMES, SETTLE_MS, SLOW_FRAME_MS,
@@ -326,6 +326,7 @@ function buildFloorPresentation(
     shell: boolean;
     roof?: boolean;
     aboveOutlines?: [number, number][][];
+    extraDoors?: Floor["doors"];
     grid: boolean;
     aisles: boolean;
   },
@@ -391,8 +392,9 @@ function buildFloorPresentation(
     g.add(line);
   }
 
-  // Wände mit Türöffnungen und dunkler Oberkante.
-  for (const { a: [ax, ay], b: [bx, by] } of wallPieces(outline, floor.doors ?? [])) {
+  // Wände mit Türöffnungen (inkl. Türen angrenzender Nachbarhallen) und dunkler Oberkante.
+  const allFloorDoors = [...(floor.doors ?? []), ...(opts.extraDoors ?? [])];
+  for (const { a: [ax, ay], b: [bx, by] } of wallPieces(outline, allFloorDoors)) {
     const dx = bx - ax, dz = by - ay, len = Math.hypot(dx, dz);
     if (len < 1e-6) continue;
     const wall = new THREE.Mesh(new THREE.BoxGeometry(len, WALL_H, 0.14), new THREE.MeshBasicMaterial({
@@ -2250,10 +2252,18 @@ function ThreeFloorPlan({
     // Wände als schmale Körper; die Oberkante bekommt eine dunkle Linie.
     // Türen sind Öffnungen: die Wand läuft nicht durch ein Tor hindurch.
     const outline = floor.outline ?? [];
+    const sameElevNeighbors = neighborPlaces
+      .filter((p) => Math.abs(p.hall.elevation_m) < 0.8)
+      .map((p) => ({ id: p.hall.id, x: p.x, y: p.y, rotation_deg: p.hall.rotation_deg, floor: p.hall.floor }));
+    const activePlacement = { id: floor.id ?? -1, x: 0, y: 0, rotation_deg: 0, floor };
+    const sharedNeighborDoors = sameElevNeighbors.length
+      ? sharedBoundaryDoors(activePlacement, [activePlacement, ...sameElevNeighbors])
+      : [];
+    const allActiveDoors = [...(floor.doors ?? []), ...sharedNeighborDoors];
     if (outline.length >= 3) {
       const wallMat = new THREE.MeshBasicMaterial({ color: sideColor });
       const topPoints: THREE.Vector3[] = [];
-      const wallSegs = vis.doors ? wallPieces(outline, floor.doors ?? []) : wallPieces(outline);
+      const wallSegs = vis.doors ? wallPieces(outline, allActiveDoors) : wallPieces(outline);
       for (const { a: [ax, ay], b: [bx, by] } of wallSegs) {
         const dx = bx - ax, dz = by - ay;
         const len = Math.hypot(dx, dz);
@@ -2356,6 +2366,36 @@ function ThreeFloorPlan({
         const kind = obstacleKind(o);
         const solid = kind === "wall" || kind === "room" || kind === "column" || kind === "round_column";
         const isFence = kind === "fence";
+        // Innenraum (Raumbox) oder Innen-/Trennwand mit Tür: offene Wandstücke statt massivem Block,
+        // damit die Türöffnung in 3D sichtbar und begehbar bleibt.
+        if (vis.doors && obstacleHasDoor(o, allActiveDoors)) {
+          const wallMat = new THREE.MeshBasicMaterial({
+            color: sideColor, transparent: true, opacity: 0.88, toneMapped: false,
+          });
+          const edgeMat = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: 0.8 });
+          for (const { a: [ax, az], b: [bx, bz] } of obstacleWallPieces(o, allActiveDoors)) {
+            const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+            if (len < 1e-4) continue;
+            const segGeo = new THREE.BoxGeometry(len, h, 0.14);
+            const segMesh = new THREE.Mesh(segGeo, wallMat);
+            segMesh.position.set((ax + bx) / 2, h / 2, (az + bz) / 2);
+            segMesh.rotation.y = -Math.atan2(dz, dx);
+            segMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(segGeo), edgeMat));
+            root.add(segMesh);
+          }
+          if (kind === "room") {
+            const lid = new THREE.Mesh(
+              floorGeometry(o.points),
+              new THREE.MeshBasicMaterial({
+                color: css("--g-surface-2", "#8a96a3"),
+                transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
+              }),
+            );
+            lid.position.y = h + 0.005;
+            root.add(lid);
+          }
+          continue;
+        }
         const geo = new THREE.ExtrudeGeometry(floorShape(o.points), { depth: h, bevelEnabled: false });
         geo.rotateX(-Math.PI / 2);
         const topMat = new THREE.MeshBasicMaterial({
@@ -2485,64 +2525,130 @@ function ThreeFloorPlan({
       }
     }
 
-    // Tore: farbige Markierung auf der Wand, mit Namen.
+    // Türen, Hallentore, Laderampen, Notausgänge & Fensterbänder in 3D.
+    // Treppen & Aufzüge werden darunter durch buildVerticalLink als eigene 3D-Körper gebaut.
     if (vis.doors) {
       for (const d of floor.doors ?? []) {
-        const w = d.width || 2.5;
         const dk = effectiveDoorKind(d);
+        if (dk === "stair" || dk === "lift") continue;
+        const w = Math.max(0.5, Number(d.width) || (dk === "gate" ? 4.0 : dk === "ramp" ? 3.2 : dk === "window" ? 3.0 : 1.2));
         const colour = dk === "gate" ? css("--g-floor-warn", "#c4520a")
           : dk === "ramp" ? css("--g-flow-supply", "#8e5cb8")
-          : dk === "stair" ? "#0d9488"
-          : dk === "lift" ? "#4f46e5"
           : dk === "emergency" ? "#16a34a"
           : dk === "window" ? "#0284c7"
           : css("--g-flow-ship", "#217e56");
         const [ux, uy] = doorDirection(floor, d);
         const turn = -Math.atan2(uy, ux);
-        const outer = new THREE.Mesh(
-          new THREE.BoxGeometry(w, 0.18, 0.22),
-          new THREE.MeshBasicMaterial({ color: new THREE.Color(colour) }),
-        );
-        outer.position.set(d.x, 0.45, d.y);
-        outer.rotation.y = turn;
-        const inner = new THREE.Mesh(
-          new THREE.BoxGeometry(Math.max(0.2, w - 0.3), 0.07, 0.24),
-          new THREE.MeshBasicMaterial({ color: 0xffffff }),
-        );
-        inner.position.set(d.x, 0.45, d.y);
-        inner.rotation.y = turn;
-        root.add(outer, inner);
-        // Mit Hallenhülle wird aus der Markierung ein Tor: Pfosten, Sturz und
-        // eine dunkle Öffnung in der Wand (bei Fensterband eine Glasfläche).
-        if (vis.shell) {
-          const frameH = d.kind === "window" ? Math.min(2.5, hallH - 0.4) : Math.min(2.8, hallH - 0.3);
-          const doorMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colour), toneMapped: false });
+        const doorGroup = new THREE.Group();
+        doorGroup.position.set(d.x, 0, d.y);
+        doorGroup.rotation.y = turn;
+
+        const accentMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colour), toneMapped: false });
+        const darkMat = new THREE.MeshBasicMaterial({ color: sideColor, toneMapped: false });
+
+        if (dk === "window") {
+          const sillH = 1.0;
+          const topH = Math.min(2.6, Math.max(1.8, hallH - 0.4));
+          const paneH = Math.max(0.5, topH - sillH);
+          // Brüstung + Sturz + Pfosten
+          const sill = new THREE.Mesh(new THREE.BoxGeometry(w + 0.12, 0.1, 0.18), accentMat);
+          sill.position.set(0, sillH, 0);
+          const lintel = new THREE.Mesh(new THREE.BoxGeometry(w + 0.12, 0.1, 0.18), accentMat);
+          lintel.position.set(0, topH, 0);
+          doorGroup.add(sill, lintel);
           for (const sign of [-1, 1]) {
-            const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, frameH, 0.16), doorMat);
-            post.position.set(d.x + ux * sign * w / 2, frameH / 2, d.y + uy * sign * w / 2);
-            post.rotation.y = turn;
-            root.add(post);
+            const jamb = new THREE.Mesh(new THREE.BoxGeometry(0.1, paneH, 0.16), accentMat);
+            jamb.position.set(sign * (w / 2), sillH + paneH / 2, 0);
+            doorGroup.add(jamb);
           }
-          const lintel = new THREE.Mesh(new THREE.BoxGeometry(w + 0.12, 0.14, 0.16), doorMat);
-          lintel.position.set(d.x, frameH, d.y);
-          lintel.rotation.y = turn;
-          root.add(lintel);
-          if (d.kind === "window") {
-            const sillH = 1.0;
-            const paneH = Math.max(0.6, frameH - sillH);
-            const pane = new THREE.Mesh(
-              new THREE.BoxGeometry(Math.max(0.2, w - 0.12), paneH, 0.08),
-              new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.36, side: THREE.DoubleSide, toneMapped: false }),
-            );
-            pane.position.set(d.x, sillH + paneH / 2, d.y);
-            pane.rotation.y = turn;
-            root.add(pane);
+          const pane = new THREE.Mesh(
+            new THREE.BoxGeometry(Math.max(0.2, w - 0.1), paneH, 0.06),
+            new THREE.MeshBasicMaterial({
+              color: 0x38bdf8, transparent: true, opacity: 0.34, side: THREE.DoubleSide, toneMapped: false,
+            }),
+          );
+          pane.position.set(0, sillH + paneH / 2, 0);
+          doorGroup.add(pane);
+          // Senkrechte Sprossen alle ~1,5 m
+          const mullions = Math.max(0, Math.floor(w / 1.5) - 1);
+          for (let m = 1; m <= mullions; m++) {
+            const mx = -w / 2 + (w * m) / (mullions + 1);
+            const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, paneH, 0.09), accentMat);
+            bar.position.set(mx, sillH + paneH / 2, 0);
+            doorGroup.add(bar);
+          }
+        } else {
+          // Boden-Schwelle (flach, blockiert keinen Durchgang)
+          const threshold = new THREE.Mesh(
+            new THREE.BoxGeometry(w, 0.03, 0.24),
+            new THREE.MeshBasicMaterial({ color: new THREE.Color(colour), transparent: true, opacity: 0.72, toneMapped: false }),
+          );
+          threshold.position.set(0, 0.015, 0);
+          doorGroup.add(threshold);
+
+          const frameH = dk === "gate"
+            ? Math.min(4.2, hallH - 0.45)
+            : dk === "ramp"
+              ? Math.min(3.6, hallH - 0.45)
+              : Math.min(2.25, hallH - 0.3);
+
+          if (vis.shell) {
+            for (const sign of [-1, 1]) {
+              const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, frameH, 0.18), accentMat);
+              post.position.set(sign * (w / 2), frameH / 2, 0);
+              doorGroup.add(post);
+            }
+            const lintel = new THREE.Mesh(new THREE.BoxGeometry(w + 0.14, 0.14, 0.18), accentMat);
+            lintel.position.set(0, frameH, 0);
+            doorGroup.add(lintel);
+
+            if (dk === "gate") {
+              // Sektionaltor-Kasten oben am Sturz
+              const shutter = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.3, w - 0.12), 0.42, 0.2), darkMat);
+              shutter.position.set(0, frameH - 0.24, 0);
+              doorGroup.add(shutter);
+            } else if (dk === "ramp") {
+              // Gummipuffer links & rechts an der Laderampe
+              for (const sign of [-1, 1]) {
+                const bumper = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.75, 0.28), darkMat);
+                bumper.position.set(sign * (w / 2 + 0.04), 0.95, 0.12);
+                doorGroup.add(bumper);
+              }
+            } else if (dk === "emergency") {
+              // Grünes Fluchtweg-Leuchtschild über dem Sturz
+              const signBox = new THREE.Mesh(
+                new THREE.BoxGeometry(Math.min(0.9, w * 0.7), 0.22, 0.08),
+                new THREE.MeshBasicMaterial({ color: 0x22c55e, toneMapped: false }),
+              );
+              signBox.position.set(0, frameH + 0.2, 0);
+              doorGroup.add(signBox);
+            } else {
+              // Leicht geöffnetes Türblatt (35°), sofort als Tür erkennbar
+              const leafW = Math.min(w - 0.12, 1.15);
+              if (leafW > 0.35) {
+                const pivot = new THREE.Group();
+                pivot.position.set(-w / 2 + 0.06, 0, 0);
+                pivot.rotation.y = 0.6;
+                const leaf = new THREE.Mesh(
+                  new THREE.BoxGeometry(leafW, frameH - 0.1, 0.05),
+                  new THREE.MeshBasicMaterial({
+                    color: new THREE.Color(colour), transparent: true, opacity: 0.28, side: THREE.DoubleSide, toneMapped: false,
+                  }),
+                );
+                leaf.position.set(leafW / 2, (frameH - 0.1) / 2, 0);
+                pivot.add(leaf);
+                doorGroup.add(pivot);
+              }
+            }
           }
         }
+        root.add(doorGroup);
+
         if (vis.labels && d.name) {
           const el = document.createElement("div");
           el.textContent = d.name;
-          addCssLabel(root, el, d.x, WALL_H + 0.24, d.y, "three-door-label");
+          const labelY = dk === "window" ? 2.75 : dk === "gate" ? Math.min(4.45, hallH - 0.2) : WALL_H + 0.3;
+          addCssLabel(root, el, d.x, labelY, d.y, "three-door-label");
         }
       }
     }
@@ -2996,7 +3102,7 @@ function ThreeFloorPlan({
       // Die nächste Schleife räumt die Gruppe ab; asynchrone Modelle prüfen
       // vor dem Einhängen, ob ihre Station noch in der Szene steht.
     };
-  }, [ready, themeTick, floor, stations, statusKey, flow, maxFlow, vis, links, groundY, activeOffset, levels]);
+  }, [ready, themeTick, floor, stations, statusKey, flow, maxFlow, vis, links, groundY, activeOffset, levels, neighborPlaces]);
 
   // Auswahl an Ort und Stelle (task 41 C): abdunkeln, was nicht mit der
   // Auswahl verbunden ist, Kante und Statuskante der gewählten Station
@@ -3726,6 +3832,12 @@ function ThreeFloorPlan({
     // Andere Hallen desselben Standorts: an ihrer Kartenlage, gedämpft wie
     // die anderen Ebenen. Sie sind Anschauung, kein Klickziel.
     const placements = neighborPlaces;
+    const allHallPlacements = [
+      { id: floor.id ?? -1, x: 0, y: 0, rotation_deg: 0, elevation_m: 0, floor },
+      ...placements.map((p) => ({
+        id: p.hall.id, x: p.x, y: p.y, rotation_deg: p.hall.rotation_deg, elevation_m: p.hall.elevation_m, floor: p.hall.floor,
+      })),
+    ];
     for (const p of placements) {
       const nh = p.hall;
       const solid = fullView || fullHallIds.includes(nh.id);
@@ -3733,8 +3845,11 @@ function ThreeFloorPlan({
         .filter((o) => o.hall.id === nh.id && o.hall.elevation_m > nh.elevation_m + 1e-3
           && (o.hall.floor.outline?.length ?? 0) >= 3)
         .map((o) => o.hall.floor.outline);
+      const nhTarget = { id: nh.id, x: p.x, y: p.y, rotation_deg: nh.rotation_deg };
+      const nhSameElev = allHallPlacements.filter((h) => Math.abs(h.elevation_m - nh.elevation_m) < 0.8);
+      const nhExtraDoors = sharedBoundaryDoors(nhTarget, nhSameElev);
       const g = buildFloorPresentation(nh.floor, nh.stations, {
-        full: solid, shell: vis.shell, roof: vis.roof, aboveOutlines: nhAbove, grid: vis.grid, aisles: vis.aisles,
+        full: solid, shell: vis.shell, roof: vis.roof, aboveOutlines: nhAbove, extraDoors: nhExtraDoors, grid: vis.grid, aisles: vis.aisles,
       });
       g.position.set(p.x, activeOffset + nh.elevation_m, p.y);
       g.rotation.y = rad(nh.rotation_deg);

@@ -15,6 +15,7 @@ import {
   buildCirclePolygon,
   carveWallIndentation,
   circleDimensions,
+  defaultDoorWidth,
   doorDirection,
   effectiveDoorKind,
   heatColour,
@@ -580,9 +581,10 @@ export default function FloorPlan({
       const raw: [number, number] = [snap(mx), snap(my)];
       const cur = floor.doors?.[d.idx];
       const dk = cur ? effectiveDoorKind(cur) : doorKind;
-      const p = e.altKey ? raw : snapDoorToWall(floor, raw, dk).point;
+      const w = cur?.width || defaultDoorWidth(dk);
+      const p = e.altKey ? raw : snapDoorToWall(floor, raw, dk, w).point;
       onDoorMove?.(d.idx, p);
-      setTip({ x: p[0], y: p[1] - 0.6, text: `${fmtNum(p[0])} · ${fmtNum(p[1])} m` });
+      setTip({ x: p[0], y: p[1] - 0.6, text: `${fmtNum(p[0])} · ${fmtNum(p[1])} m (${fmtNum(w)} m)` });
       return;
     }
     if (!onStationMove) return;
@@ -836,7 +838,8 @@ export default function FloorPlan({
       return;
     }
     if (doorMode) {
-      const snapped = e.altKey ? shown : snapDoorToWall(floor, shown, doorKind).point;
+      const w = defaultDoorWidth(doorKind);
+      const snapped = e.altKey ? shown : snapDoorToWall(floor, shown, doorKind, w).point;
       onDoorClick?.(snapped);
       return;
     }
@@ -1345,14 +1348,19 @@ export default function FloorPlan({
               }}
               onPick={() => onDoorSelect?.(i)} />
           ))}
-          {/* Vorschau für neuen Zugang — rastet live auf der nächsten Wand ein. */}
+          {/* Vorschau für neuen Zugang — rastet live auf der nächsten Wand ein (Alt = frei). */}
           {doorMode && cursor && (() => {
-            const snapped = snapDoorToWall(floor, cursor, doorKind);
-            const ghostDoor: Door = { name: "", x: snapped.point[0], y: snapped.point[1], width: 2.0, kind: doorKind };
+            const w = defaultDoorWidth(doorKind);
+            const free = !!cursorState?.alt;
+            const snapped = free
+              ? { point: cursor, snapped: false, dir: [1, 0] as [number, number] }
+              : snapDoorToWall(floor, cursor, doorKind, w);
+            const ghostDoor: Door = { name: `${fmtNum(w)} m`, x: snapped.point[0], y: snapped.point[1], width: w, kind: doorKind };
+            const dir = snapped.snapped ? snapped.dir : doorDirection(floor, ghostDoor);
             return (
-              <g opacity={0.65} pointerEvents="none">
-                <DoorMark door={ghostDoor} idx={-1} direction={doorDirection(floor, ghostDoor)}
-                  editable={false} selected labels={false} size={null} quiet={quietMap}
+              <g opacity={0.72} pointerEvents="none">
+                <DoorMark door={ghostDoor} idx={-1} direction={dir}
+                  editable={false} selected labels size={labelSize(0.3, 10, 8)} quiet={false}
                   onDown={() => {}} onPick={() => {}} />
               </g>
             );
@@ -2198,6 +2206,43 @@ function DoorMark({ door, direction, editable, selected, labels, size, quiet, ha
             stroke={colour} strokeWidth={1.1} opacity={0.65} vectorEffect="non-scaling-stroke" />
           <line x1={w / 2} y1={-0.45} x2={-w / 2} y2={0.45}
             stroke={colour} strokeWidth={1.1} opacity={0.65} vectorEffect="non-scaling-stroke" />
+        </g>
+      ) : kind === "door" || kind === "emergency" ? (
+        <g transform={`translate(${door.x} ${door.y}) rotate(${angle})`}>
+          {/* Wandöffnung + Türpfosten + 90°-Schwenkbogen (Architektur-Symbol) */}
+          <line x1={-w / 2} y1={0} x2={w / 2} y2={0}
+            stroke="var(--g-surface)" strokeWidth={selected ? 5.5 : 4} strokeLinecap="butt"
+            vectorEffect="non-scaling-stroke" />
+          <line x1={-w / 2} y1={-0.18} x2={-w / 2} y2={0.18}
+            stroke={colour} strokeWidth={selected ? 2.6 : 2} vectorEffect="non-scaling-stroke" />
+          <line x1={w / 2} y1={-0.18} x2={w / 2} y2={0.18}
+            stroke={colour} strokeWidth={selected ? 2.6 : 2} vectorEffect="non-scaling-stroke" />
+          <line x1={-w / 2} y1={0} x2={-w / 2} y2={Math.min(w, 1.35)}
+            stroke={colour} strokeWidth={selected ? 2.2 : 1.5} vectorEffect="non-scaling-stroke" />
+          <path
+            d={`M ${-w / 2} ${Math.min(w, 1.35)} A ${Math.min(w, 1.35)} ${Math.min(w, 1.35)} 0 0 0 ${-w / 2 + Math.min(w, 1.35)} 0`}
+            fill="none" stroke={colour} strokeWidth={1.1} strokeDasharray="3 2.5" opacity={0.8}
+            vectorEffect="non-scaling-stroke"
+          />
+        </g>
+      ) : kind === "gate" ? (
+        <g transform={`translate(${door.x} ${door.y}) rotate(${angle})`}>
+          {/* Hallentor: breite Doppel-Schiene mit Endpfosten */}
+          <rect x={-w / 2} y={-0.16} width={w} height={0.32} rx={0.04}
+            fill="var(--g-surface)" stroke={colour} strokeWidth={selected ? 2.6 : 1.8}
+            vectorEffect="non-scaling-stroke" />
+          <line x1={-w / 2 + 0.12} y1={0} x2={w / 2 - 0.12} y2={0}
+            stroke={colour} strokeWidth={1.4} strokeDasharray="5 3"
+            vectorEffect="non-scaling-stroke" />
+        </g>
+      ) : kind === "ramp" ? (
+        <g transform={`translate(${door.x} ${door.y}) rotate(${angle})`}>
+          {/* Laderampe: Toröffnung + außenliegende Rampenlippe */}
+          <rect x={-w / 2} y={-0.22} width={w} height={0.44} rx={0.05}
+            fill={colour} fillOpacity={0.18} stroke={colour} strokeWidth={selected ? 2.5 : 1.6}
+            vectorEffect="non-scaling-stroke" />
+          <line x1={-w / 2} y1={0} x2={w / 2} y2={0}
+            stroke={colour} strokeWidth={2} vectorEffect="non-scaling-stroke" />
         </g>
       ) : (
         <>

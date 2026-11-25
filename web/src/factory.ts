@@ -109,7 +109,10 @@ export function doorDirection(floor: Floor, door: Door): [number, number] {
     }
   };
   addLoop(floor.outline ?? []);
-  for (const o of floor.obstacles ?? []) addLoop(o.points ?? []);
+  for (const o of floor.obstacles ?? []) {
+    const ok = obstacleKind(o);
+    if (ok === "wall" || ok === "partition" || ok === "room") addLoop(o.points ?? []);
+  }
 
   let best: [[number, number], [number, number]] | null = null;
   let bestDistance = Infinity;
@@ -142,14 +145,22 @@ export function effectiveDoorKind(d: Pick<Door, "name" | "kind">): Door["kind"] 
   return k;
 }
 
+/** Standardbreite eines Zugangs anhand seiner Art. */
+export function defaultDoorWidth(kind: Door["kind"]): number {
+  return DOOR_KINDS.find((k) => k.id === kind)?.width ?? 1.2;
+}
+
 /** Rastet einen Zugang auf die nächste Wand (Umriss oder Wand-/Raum-Hindernis) ein.
- *  Wandgebundene Zugänge (Tür, Tor, Rampe, Notausgang, Fensterband) landen immer auf
- *  der nächsten Wand, sobald eine existiert; Treppen & Aufzüge rasten nur nahe an Wänden ein. */
+ *  - Klemmt die Türmitte in den gültigen Wandbereich ``[width/2, len - width/2]``,
+ *    damit Tore/Fenster nie über Hallenecken hinausragen.
+ *  - Rastet entlang der Wand sauber auf ``floor.snap`` (z. B. 0,25 m) ein.
+ *  - Treppen & Aufzüge rasten nur nahe an Wänden (<= 1,2 m) ein. */
 export function snapDoorToWall(
   floor: Floor,
   p: [number, number],
   kind: Door["kind"],
-): { point: [number, number]; snapped: boolean } {
+  width?: number,
+): { point: [number, number]; snapped: boolean; dir: [number, number]; wallLength: number } {
   const segments: [[number, number], [number, number]][] = [];
   const addLoop = (points: [number, number][] | undefined) => {
     if (!points || points.length < 2) return;
@@ -163,27 +174,60 @@ export function snapDoorToWall(
     const ok = obstacleKind(o);
     if (ok === "wall" || ok === "partition" || ok === "room") addLoop(o.points ?? []);
   }
-  if (!segments.length) return { point: p, snapped: false };
+  if (!segments.length) return { point: p, snapped: false, dir: [1, 0], wallLength: 0 };
+
+  const w = Math.max(0.5, Number(width) || defaultDoorWidth(kind));
+  const half = w / 2;
+  const step = floor.snap && floor.snap > 0 ? floor.snap : 0.25;
+  const freeStanding = kind === "stair" || kind === "lift";
 
   let bestPt: [number, number] = p;
+  let bestDir: [number, number] = [1, 0];
+  let bestLen = 0;
   let bestDist2 = Infinity;
+
   for (const [a, b] of segments) {
     const vx = b[0] - a[0], vy = b[1] - a[1];
     const len2 = vx * vx + vy * vy;
-    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / len2));
-    const px = a[0] + vx * t, py = a[1] + vy * t;
-    const d2 = (p[0] - px) ** 2 + (p[1] - py) ** 2;
-    if (d2 < bestDist2) { bestDist2 = d2; bestPt = [px, py]; }
+    const len = Math.sqrt(len2);
+    if (len < 1e-6) continue;
+    const ux = vx / len, uy = vy / len;
+    const rawAlong = ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / len;
+    const clampedRaw = Math.max(0, Math.min(len, rawAlong));
+    const rx = a[0] + ux * clampedRaw, ry = a[1] + uy * clampedRaw;
+    const d2 = (p[0] - rx) ** 2 + (p[1] - ry) ** 2;
+
+    if (d2 < bestDist2) {
+      bestDist2 = d2;
+      bestDir = [ux, uy];
+      bestLen = len;
+      if (freeStanding) {
+        bestPt = [rx, ry];
+      } else if (len <= w + 0.1) {
+        // Wand ist schmaler oder gleich breit wie der Zugang → mittig zentrieren.
+        bestPt = [a[0] + ux * (len / 2), a[1] + uy * (len / 2)];
+      } else {
+        const margin = half + 0.05;
+        let along = Math.max(margin, Math.min(len - margin, rawAlong));
+        const snappedAlong = Math.round(along / step) * step;
+        if (snappedAlong >= margin && snappedAlong <= len - margin) {
+          along = snappedAlong;
+        }
+        bestPt = [a[0] + ux * along, a[1] + uy * along];
+      }
+    }
   }
-  const freeStanding = kind === "stair" || kind === "lift";
+
   const maxDist = freeStanding ? 1.2 : Infinity;
   if (Math.sqrt(bestDist2) <= maxDist) {
     return {
       point: [Math.round(bestPt[0] * 100) / 100, Math.round(bestPt[1] * 100) / 100],
       snapped: true,
+      dir: bestDir,
+      wallLength: bestLen,
     };
   }
-  return { point: p, snapped: false };
+  return { point: p, snapped: false, dir: bestDir, wallLength: bestLen };
 }
 
 /** Bauteil-Art eines Hindernisses — bevorzugt das gespeicherte `kind`, fällt sonst

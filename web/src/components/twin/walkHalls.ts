@@ -87,10 +87,27 @@ function placeShape(shape: Shape, h: HallPlacement): Shape {
   return { kind: "box", cx, cy, w: shape.w, h: shape.h, rotation: shape.rotation - h.rotation_deg };
 }
 
+/** Projiziert Türen anderer angrenzender Hallen in das lokale Koordinatensystem von ``target``,
+ *  damit eine einzelne Tür auf einer gemeinsamen Hallenwand beide aneinanderstoßenden Wände öffnet. */
+export function sharedBoundaryDoors(
+  target: Pick<HallPlacement, "id" | "x" | "y" | "rotation_deg">,
+  halls: Pick<HallPlacement, "id" | "x" | "y" | "rotation_deg" | "floor">[],
+): Door[] {
+  const extra: Door[] = [];
+  for (const other of halls) {
+    if (other.id === target.id) continue;
+    for (const d of other.floor.doors ?? []) {
+      const worldPt = placePoint([d.x, d.y], other);
+      const localPt = unplacePoint(worldPt, target);
+      extra.push({ ...d, x: localPt[0], y: localPt[1] });
+    }
+  }
+  return extra;
+}
+
 /** Alle festen Körper der aktiven Halle und der sichtbaren Nachbarhallen in
     einem Weltmodell. Treppen und Aufzüge sind auch dort Körper; Türen sind
-    Durchgänge. Hallen auf einer anderen Höhe bleiben draußen — man geht keine
-    Wand hinauf. */
+    Durchgänge — auch durch gemeinsam aneinanderstoßende Hallenwände. */
 export function hallWalkWorld(halls: HallPlacement[]): CollisionWorld {
   const colliders: Collider[] = [];
   halls.forEach((h, i) => {
@@ -106,7 +123,8 @@ export function hallWalkWorld(halls: HallPlacement[]): CollisionWorld {
         ],
       }
       : h.floor;
-    const world = buildTwinWorld(floor, h.stations, { openDoors: true });
+    const extraDoors = sharedBoundaryDoors(h, halls);
+    const world = buildTwinWorld(floor, h.stations, { openDoors: true, extraDoors });
     for (const c of world.colliders) {
       colliders.push({
         ...c,
