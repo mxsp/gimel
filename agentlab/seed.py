@@ -105,27 +105,6 @@ def seed(db: Session, verbose: bool = False) -> dict:
             )
         )
         created += 1
-    has_fyrefly = (
-        db.query(AgentProvider)
-        .filter(AgentProvider.name == FYREFLY_MODELS_NAME)
-        .first()
-        is not None
-    )
-    if not has_fyrefly:
-        db.add(
-            AgentProvider(
-                name=FYREFLY_MODELS_NAME,
-                kind="ollama",
-                base_url=f"{FYREFLY_OLLAMA_BASE}/v1",
-                models_url=f"{FYREFLY_OLLAMA_BASE}/api/tags",
-                default_model=FYREFLY_DEFAULT_MODEL,
-                enabled=True,
-                is_default=False,
-                created_by="system",
-                updated_by="system",
-            )
-        )
-        created += 1
     if created:
         db.commit()
         if verbose:

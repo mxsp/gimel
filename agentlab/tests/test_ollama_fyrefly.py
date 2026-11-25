@@ -10,15 +10,13 @@ from agentlab import llm, providers as prov_mod
 from agentlab.models import AgentProvider
 
 
-def test_fyrefly_models_seeded_with_32k_context_and_no_key_required(client):
+def test_fyrefly_models_not_preselected_and_ollama_preset_keyless(client):
     data = client.get("/api/agent/providers").json()
-    assert "fyrefly-models" in data["presets"]
+    assert "fyrefly-models" not in data["presets"]
+    assert "ollama" in data["presets"]
+    assert data["presets"]["ollama"]["requires_key"] == "false"
     ff = next((p for p in data["providers"] if p["name"] == "FyreFly Models"), None)
-    assert ff is not None
-    assert ff["kind"] == "ollama"
-    assert ff["requires_key"] is False
-    assert ff["context_length"] == 32768
-    assert ff["default_model"] == "gpt-oss:20b"
+    assert ff is None
 
 
 def test_parse_ollama_api_tags_extracts_context_and_size():

@@ -143,17 +143,6 @@ PROVIDER_ENV_VARS: dict[str, tuple[str, ...]] = {
 KEYLESS_KINDS: frozenset[str] = frozenset({"ollama", "fyrefly-models", "lmstudio", "local-openai"})
 
 PRESETS: dict[str, dict[str, str]] = {
-    "fyrefly-models": {
-        "name": FYREFLY_MODELS_NAME,
-        "kind": "ollama",
-        "base_url": f"{FYREFLY_OLLAMA_BASE}/v1",
-        "models_url": f"{FYREFLY_OLLAMA_BASE}/api/tags",
-        "default_model": FYREFLY_DEFAULT_MODEL,
-        "protocol": "ollama",
-        "category": "local",
-        "requires_key": "false",
-        "hint": "Lokaler FyreFly-Ollama-Server im LAN (32k Kontext, kein Schlüssel nötig).",
-    },
     "google-gemini": {
         "name": "Google Gemini",
         "kind": "google-gemini",
