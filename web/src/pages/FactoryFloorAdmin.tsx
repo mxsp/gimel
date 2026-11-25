@@ -5,7 +5,7 @@ import { api, apiUpload } from "../api";
 import { More, PageInfo, pageInfo } from "../ui";
 import { navigate } from "../router";
 import { toastError, toastInfo, toastSuccess } from "../toast";
-import FloorPlan from "../components/FloorPlan";
+import FloorPlan, { type ReferenceLevel } from "../components/FloorPlan";
 import {
   aisleAttach, aisleComponents, aisleStub, Aisles, buildPresetPolygon, circleDimensions, cleanAisles, connectStation, effectiveDoorKind, manualAttach, ManualPath, Pathfinder,
   polylineLength, proposeConnection, rectDimensions, resizeCirclePolygon, resizeRectPolygon, rotatePolygon, simplifyPolyline, ALL_TYPES, BLANK_STATION, COLOUR_PALETTE, copyToClipboard, Door,
@@ -109,7 +109,36 @@ export default function FloorAdmin({
   const [ioText, setIoText] = useState("");
   const [dxfOpen, setDxfOpen] = useState(false);
   const [tab, setTab] = useState("halle");
-  const [show, setShow] = useState({ links: true, zones: true, obstacles: true, aisles: true, doors: true, grid: true, labels: true });
+  const [show, setShow] = useState({ links: true, zones: true, obstacles: true, aisles: true, doors: true, grid: true, labels: true, levels: true });
+  const [siblingLevels, setSiblingLevels] = useState<ReferenceLevel[]>([]);
+
+  // Andere Geschosse derselben Halle als Zeichen- und Fanghilfe laden.
+  useEffect(() => {
+    const hall = site.current?.hall;
+    const currentId = site.floorId ?? floor.id;
+    const others = (hall?.floors ?? []).filter((f) => f.id !== currentId);
+    if (!others.length) { setSiblingLevels([]); return; }
+    let cancelled = false;
+    Promise.all(
+      others.map(async (f): Promise<ReferenceLevel | null> => {
+        try {
+          const plan = await api<Floor>(`/api/factory/floor?floor_id=${f.id}`);
+          if (!plan.outline || plan.outline.length < 3) return null;
+          return {
+            id: f.id,
+            label: f.level_name || (f.level === 0 ? "EG" : f.level > 0 ? `${f.level}. OG` : `${-f.level}. UG`),
+            level: f.level || 0,
+            outline: plan.outline,
+          };
+        } catch {
+          return null;
+        }
+      }),
+    ).then((rows) => {
+      if (!cancelled) setSiblingLevels(rows.filter((r): r is ReferenceLevel => r !== null));
+    });
+    return () => { cancelled = true; };
+  }, [site.current?.hall?.id, site.current?.hall?.floors.length, site.floorId, floor.id]);
 
   const stationsRef = useRef<Station[]>([]);
   stationsRef.current = stations;
@@ -1244,6 +1273,7 @@ export default function FloorAdmin({
             floor={floor}
             map={hallMap}
             north={site.current?.hall && (site.current.hall.lat || site.current.hall.lon) ? site.current.hall.rotation_deg : null}
+            referenceLevels={show.levels ? siblingLevels : undefined}
             stations={stations}
             selectedId={selectedId}
             movable={!phone && mode === "select"}
@@ -1325,9 +1355,9 @@ export default function FloorAdmin({
           <div className="floor-legend">
             <KeyPopover placement="top-start" content={
               <Menu>
-                {(["links", "zones", "obstacles", "aisles", "doors", "grid", "labels"] as const).map((k) => (
+                {(["links", "zones", "obstacles", "aisles", "doors", "grid", "labels", "levels"] as const).map((k) => (
                   <MenuItem key={k} active={show[k]} icon={show[k] ? "eye-open" : "eye-off"} shouldDismissPopover={false}
-                    text={{ links: "Anbindungen", zones: "Zonen", obstacles: "Hindernisse", aisles: "Gänge", doors: "Tore", grid: "Raster", labels: "Beschriftung" }[k]}
+                    text={{ links: "Anbindungen", zones: "Zonen", obstacles: "Hindernisse", aisles: "Gänge", doors: "Tore", grid: "Raster", labels: "Beschriftung", levels: "Andere Ebenen" }[k]}
                     onClick={() => setShow({ ...show, [k]: !show[k] })} />
                 ))}
               </Menu>

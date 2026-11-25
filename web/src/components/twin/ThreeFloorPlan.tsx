@@ -38,6 +38,13 @@ import {
 } from "./frameBudget";
 import { mergeStatic } from "./staticMerge";
 import { viewerFocus, type GhostLevel, type NeighborHall, type ViewerFocus } from "./twinScope";
+import {
+  levelConnectorShafts,
+  polygonStrictlyInside,
+  roofSkylightStrips,
+  roofTrussesAndPurlins,
+  type LevelOutlineSpan,
+} from "./roofGeometry";
 import "./walk.css";
 import "./twin3d.css";
 import {
@@ -228,13 +235,100 @@ function floorGeometry(points: [number, number][], holes: [number, number][][] =
   return geoms;
 }
 
+/** Polygon-geklippte Dachträger, Pfetten, Dachfläche und Lichtbänder.
+ *  Nichts ragt bei L-/U-/ausgeschnittenen Hallen in die Luft hinaus; bei
+ *  mehreren nicht deckungsgleich gestapelten Geschossen bleiben Lichtbänder
+ *  auf den tatsächlich freien Dachflächen und streng innenliegende
+ *  Obergeschosse werden aus der Dachfläche darunter ausgespart. */
+function addRoofStructure(
+  target: THREE.Group,
+  outline: [number, number][],
+  hallH: number,
+  opts: {
+    roof: boolean;
+    aboveOutlines?: [number, number][][];
+    frameMat: THREE.Material;
+    glassMat: THREE.Material;
+    opacityScale?: number;
+  },
+): void {
+  if (outline.length < 3) return;
+  const { trusses, purlins } = roofTrussesAndPurlins(outline);
+  for (const { a: [ax, az], b: [bx, bz] } of trusses) {
+    const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+    if (len < 0.2) continue;
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, 0.12), opts.frameMat);
+    beam.position.set((ax + bx) / 2, hallH, (az + bz) / 2);
+    beam.rotation.y = -Math.atan2(dz, dx);
+    target.add(beam);
+  }
+  for (const { a: [ax, az], b: [bx, bz] } of purlins) {
+    const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+    if (len < 0.2) continue;
+    const purlin = new THREE.Mesh(new THREE.BoxGeometry(len, 0.09, 0.09), opts.frameMat);
+    purlin.position.set((ax + bx) / 2, hallH + 0.02, (az + bz) / 2);
+    purlin.rotation.y = -Math.atan2(dz, dx);
+    target.add(purlin);
+  }
+  if (!opts.roof) return;
+
+  const above = (opts.aboveOutlines ?? []).filter((p) => p.length >= 3);
+  const roofHoles = above.filter((p) => polygonStrictlyInside(p, outline));
+  const scale = opts.opacityScale ?? 1;
+  const roofMesh = new THREE.Mesh(
+    floorGeometry(outline, roofHoles),
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(css("--g-hall-roof", "#cfd9e2")),
+      transparent: true,
+      opacity: 0.24 * scale,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+    }),
+  );
+  roofMesh.position.y = hallH + 0.01;
+  roofMesh.renderOrder = -1;
+  target.add(roofMesh);
+
+  // Klare Attika-/Dachkante, damit Rücksprünge, Stufen und Terrassen in 3D sofort lesbar sind.
+  target.add(new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints(outline.map(([x, z]) => new THREE.Vector3(x, hallH + 0.025, z))),
+    new THREE.LineBasicMaterial({
+      color: new THREE.Color(css("--g-hall-frame", "#8d99a6")),
+      transparent: true,
+      opacity: 0.78 * scale,
+    }),
+  ));
+
+  const skylightMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(css("--g-hall-glass", "#d8ecfa")),
+    transparent: true,
+    opacity: 0.3 * scale,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  for (const s of roofSkylightStrips(outline, above)) {
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(s.wx, 0.018, s.wz), skylightMat);
+    strip.position.set(s.cx, hallH + 0.032, s.cz);
+    target.add(strip);
+  }
+}
+
 /** Eine zweite Ebene oder Nachbarhalle in derselben Bildsprache wie die aktive:
     Boden mit Raster, Zonen, Wände mit Öffnungen und Oberkante, Stützen,
     Gänge mit Pfeilen, Tore und Treppen. Nur Geräte und Beschriftungen kommen
     vom Aufrufer — so bleibt „andere Ebene“ eine Halle, kein Gerippe. */
 function buildFloorPresentation(
   floor: Floor, stations: Station[],
-  opts: { full: boolean; shell: boolean; grid: boolean; aisles: boolean },
+  opts: {
+    full: boolean;
+    shell: boolean;
+    roof?: boolean;
+    aboveOutlines?: [number, number][][];
+    grid: boolean;
+    aisles: boolean;
+  },
 ): THREE.Group {
   const g = new THREE.Group();
   const outline = floor.outline ?? [];
@@ -353,6 +447,13 @@ function buildFloorPresentation(
       col.position.set(x, hallH / 2, y);
       g.add(col);
     }
+    addRoofStructure(g, outline, hallH, {
+      roof: !!opts.roof,
+      aboveOutlines: opts.aboveOutlines,
+      frameMat,
+      glassMat,
+      opacityScale: opts.full ? 1 : 0.78,
+    });
   }
 
   // Stützen, Wände, Raumboxen und Regale als Körper mit Oberkante und Schraffur.
@@ -1830,9 +1931,16 @@ function ThreeFloorPlan({
     // braucht Platz für den ganzen Stapel und schaut auf seine Mitte.
     let { top: levelTop, bottom: levelBottom } = stackExtent(levels, hallH, activeOffset);
 
-    // Nachbarhallen gehören ins Bild, wenn sie eingeblendet sind.
+    // Andere Ebenen derselben Halle und Nachbarhallen gehören ins Bild.
     const placements = neighborPlacesRef.current;
     let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+    for (const lv of levels) {
+      const lb = sceneBounds(lv.floor, lv.stations);
+      x0 = Math.min(x0, lb.x);
+      y0 = Math.min(y0, lb.y);
+      x1 = Math.max(x1, lb.x + lb.w);
+      y1 = Math.max(y1, lb.y + lb.h);
+    }
     for (const p of placements) {
       x0 = Math.min(x0, p.x + p.bounds.x);
       y0 = Math.min(y0, p.y + p.bounds.y);
@@ -2217,48 +2325,17 @@ function ThreeFloorPlan({
         foot.position.set(x, 0.035, y);
         shell.add(foot);
       }
-      // Dachträger über der kürzeren Achse, Pfetten längs dazu.
-      const xs = outline.map((p) => p[0]), zs = outline.map((p) => p[1]);
-      const minX = Math.min(...xs), maxX = Math.max(...xs);
-      const minZ = Math.min(...zs), maxZ = Math.max(...zs);
-      const spanX = maxX - minX, spanZ = maxZ - minZ;
-      const alongX = spanX >= spanZ;
-      const count = Math.min(7, Math.max(1, Math.floor(Math.max(spanX, spanZ) / 8)));
-      for (let k = 1; k <= count; k++) {
-        const u = k / (count + 1);
-        const beam = alongX
-          ? new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, spanZ), frameMat)
-          : new THREE.Mesh(new THREE.BoxGeometry(spanX, 0.12, 0.12), frameMat);
-        beam.position.set(alongX ? minX + spanX * u : (minX + maxX) / 2, hallH,
-          alongX ? (minZ + maxZ) / 2 : minZ + spanZ * u);
-        shell.add(beam);
-      }
-      for (const u of [0.33, 0.67]) {
-        const purlin = alongX
-          ? new THREE.Mesh(new THREE.BoxGeometry(spanX, 0.09, 0.09), frameMat)
-          : new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, spanZ), frameMat);
-        purlin.position.set((minX + maxX) / 2, hallH + 0.02,
-          alongX ? minZ + spanZ * u : (minZ + maxZ) / 2);
-        shell.add(purlin);
-      }
-      if (vis.roof) {
-        const roof = new THREE.Mesh(floorGeometry(outline), new THREE.MeshBasicMaterial({
-          color: new THREE.Color(css("--g-hall-roof", "#cfd9e2")), transparent: true,
-          opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
-        }));
-        roof.position.y = hallH + 0.01;
-        roof.renderOrder = -1;
-        shell.add(roof);
-        // Lichtbänder: drei helle Streifen auf dem Dach.
-        for (const u of [0.25, 0.5, 0.75]) {
-          const strip = alongX
-            ? new THREE.Mesh(new THREE.BoxGeometry(spanX * 0.7, 0.01, Math.max(0.6, spanZ * 0.09)), glassMat)
-            : new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.6, spanX * 0.09), 0.01, spanZ * 0.7), glassMat);
-          strip.position.set((minX + maxX) / 2, hallH + 0.03,
-            alongX ? minZ + spanZ * u : (minZ + maxZ) / 2);
-          shell.add(strip);
-        }
-      }
+      // Dachträger, Pfetten, Dachfläche und Lichtbänder — strikt auf den
+      // Hallenumriss geklippt und mit Rücksicht auf darüberliegende Geschosse.
+      const aboveActive = levels
+        .filter((lv) => lv.offset > activeOffset + 1e-3 && (lv.floor.outline?.length ?? 0) >= 3)
+        .map((lv) => lv.floor.outline);
+      addRoofStructure(shell, outline, hallH, {
+        roof: vis.roof,
+        aboveOutlines: aboveActive,
+        frameMat,
+        glassMat,
+      });
     }
 
     // Hindernisse: Stützen, Wände, Raumboxen und Regale in ihrer echten Höhe.
@@ -2919,7 +2996,7 @@ function ThreeFloorPlan({
       // Die nächste Schleife räumt die Gruppe ab; asynchrone Modelle prüfen
       // vor dem Einhängen, ob ihre Station noch in der Szene steht.
     };
-  }, [ready, themeTick, floor, stations, statusKey, flow, maxFlow, vis, links, groundY, activeOffset]);
+  }, [ready, themeTick, floor, stations, statusKey, flow, maxFlow, vis, links, groundY, activeOffset, levels]);
 
   // Auswahl an Ort und Stelle (task 41 C): abdunkeln, was nicht mit der
   // Auswahl verbunden ist, Kante und Statuskante der gewählten Station
@@ -3555,24 +3632,73 @@ function ThreeFloorPlan({
     const accent = new THREE.Color(css("--gimel-accent", "#0b7a67"));
     const ghostStyle: Partial<DeviceStyle> = deviceStyleFromTokens(css);
 
+    const allHallSpans: LevelOutlineSpan[] = [
+      { id: floor.id ?? -1, offset: activeOffset, height: hallHeight(floor), outline: floor.outline ?? [] },
+      ...levels.map((l) => ({
+        id: l.id, offset: l.offset, height: hallHeight(l.floor), outline: l.floor.outline ?? [],
+      })),
+    ];
+
     for (const lv of (walk ? [] : levels)) {
       const solid = fullView || fullLevelIds.includes(lv.id);
+      const aboveOutlines = allHallSpans
+        .filter((s) => s.id !== lv.id && s.offset > lv.offset + 1e-3 && s.outline.length >= 3)
+        .map((s) => s.outline);
       // Dieselbe Bildsprache wie die aktive Ebene: Boden, Raster, Zonen,
-      // Wände mit Oberkante, Hallenhülle, Stützen, Gänge und Treppen. Bei
+      // Wände mit Oberkante, Hallenhülle, Dach, Stützen, Gänge und Treppen. Bei
       // „voll sichtbar“ deckend, sonst durchscheinend — aber nie ein Gerippe.
       const g = buildFloorPresentation(lv.floor, lv.stations, {
-        full: solid, shell: vis.shell, grid: vis.grid, aisles: vis.aisles,
+        full: solid, shell: vis.shell, roof: vis.roof, aboveOutlines, grid: vis.grid, aisles: vis.aisles,
       });
+      // Sichtbare Geschossdeckenkante für oberirdische / auskragende Ebenen.
+      if (lv.offset > 0.05 && (lv.floor.outline?.length ?? 0) >= 3) {
+        const slabMat = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(css("--g-iso-side", "#343d47")),
+          transparent: true,
+          opacity: solid ? 0.85 : 0.55,
+          toneMapped: false,
+        });
+        const slabH = 0.22;
+        const pts = lv.floor.outline;
+        for (let i = 0; i < pts.length; i++) {
+          const [ax, az] = pts[i];
+          const [bx, bz] = pts[(i + 1) % pts.length];
+          const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+          if (len < 1e-6) continue;
+          const rim = new THREE.Mesh(new THREE.BoxGeometry(len, slabH, 0.16), slabMat);
+          rim.position.set((ax + bx) / 2, -slabH / 2, (az + bz) / 2);
+          rim.rotation.y = -Math.atan2(dz, dx);
+          g.add(rim);
+        }
+      }
       g.position.y = lv.offset;
-      // Senkrechte Verbindungen an den Ecken: das Auge sieht, wo die Ebene
-      // über der aktiven hängt, statt beide für dieselbe Fläche zu halten.
-      const outline = lv.floor.outline ?? [];
-      if (outline.length >= 3) {
-        const shafts: number[] = [];
-        for (const [x, y] of outline) shafts.push(x, 0, y, x, lv.offset, y);
+      // Senkrechte Verbindungen an den Ecken:
+      // - gestapelt über einem Geschoss: nur die Deckenfuge verbinden
+      // - auskragend (nicht deckungsgleich): dezente Lot-Linie auf y = 0
+      const lvSpan: LevelOutlineSpan = {
+        id: lv.id, offset: lv.offset, height: hallHeight(lv.floor), outline: lv.floor.outline ?? [],
+      };
+      const connectors = levelConnectorShafts(lvSpan, allHallSpans);
+      const stackedPts: number[] = [];
+      const overhangPts: number[] = [];
+      for (const c of connectors) {
+        (c.overhang ? overhangPts : stackedPts).push(c.x, c.y0, c.z, c.x, c.y1, c.z);
+      }
+      if (stackedPts.length) {
         const lines = new THREE.LineSegments(
-          new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(shafts, 3)),
-          new THREE.LineDashedMaterial({ color: accent, transparent: true, opacity: 0.3, dashSize: 0.5, gapSize: 0.4 }),
+          new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(stackedPts, 3)),
+          new THREE.LineDashedMaterial({ color: accent, transparent: true, opacity: 0.42, dashSize: 0.35, gapSize: 0.25 }),
+        );
+        lines.computeLineDistances();
+        extras.add(lines);
+      }
+      if (overhangPts.length) {
+        const lines = new THREE.LineSegments(
+          new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(overhangPts, 3)),
+          new THREE.LineDashedMaterial({
+            color: new THREE.Color(css("--g-hall-frame", "#8d99a6")),
+            transparent: true, opacity: 0.26, dashSize: 0.45, gapSize: 0.45,
+          }),
         );
         lines.computeLineDistances();
         extras.add(lines);
@@ -3603,8 +3729,12 @@ function ThreeFloorPlan({
     for (const p of placements) {
       const nh = p.hall;
       const solid = fullView || fullHallIds.includes(nh.id);
+      const nhAbove = placements
+        .filter((o) => o.hall.id === nh.id && o.hall.elevation_m > nh.elevation_m + 1e-3
+          && (o.hall.floor.outline?.length ?? 0) >= 3)
+        .map((o) => o.hall.floor.outline);
       const g = buildFloorPresentation(nh.floor, nh.stations, {
-        full: solid, shell: vis.shell, grid: vis.grid, aisles: vis.aisles,
+        full: solid, shell: vis.shell, roof: vis.roof, aboveOutlines: nhAbove, grid: vis.grid, aisles: vis.aisles,
       });
       g.position.set(p.x, activeOffset + nh.elevation_m, p.y);
       g.rotation.y = rad(nh.rotation_deg);
@@ -3625,7 +3755,7 @@ function ThreeFloorPlan({
       extras.add(g);
     }
   }, [ready, themeTick, levels, neighborPlaces, fullView, fullLevelIds, fullHallIds, activeOffset, floor, stations, walk,
-    vis.shell, vis.grid, vis.aisles]);
+    vis.shell, vis.roof, vis.grid, vis.aisles]);
 
   // Kartengrund: Kachelstufe und Ausdehnung folgen dem sichtbaren Ausschnitt.
   // Sonst endet die Karte beim Herauszoomen mitten im Bild oder wird beim

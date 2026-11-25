@@ -43,6 +43,7 @@ import StationShape, { StatusDefs } from "./twin/StationShape";
 import { StationMark } from "./twin/marks";
 import { AISLE_LANE_M, aisleWays, linePath, manualWays, polygonPath, lanePolygon, wayArrows } from "./twin/aisleWays";
 import { buildTwinWorld, clearWays } from "./twin/collision";
+import { snapToReferenceLevels } from "./twin/roofGeometry";
 import MapStyleSwitch from "./MapStyleSwitch";
 import { mapAttribution, tilesAround, useMapStyle } from "../sites";
 
@@ -202,11 +203,23 @@ export interface FloorPlanProps {
   map?: { lat: number; lon: number; rotation_deg: number } | null;
   /** Drehung der Halle auf der Karte, für den Nordpfeil; null = Halle ohne Kartenanker. */
   north?: number | null;
+  /** Umrisse anderer Geschosse derselben Halle als Zeichen- und Fanghilfe im 2D-Editor. */
+  referenceLevels?: ReferenceLevel[];
 }
+
+export interface ReferenceLevel {
+  id: number;
+  label: string;
+  level: number;
+  outline: [number, number][];
+}
+
+const NO_REF_LEVELS: ReferenceLevel[] = [];
 
 export default function FloorPlan({
   map = null,
   north = null,
+  referenceLevels = NO_REF_LEVELS,
   floor,
   stations,
   loads,
@@ -287,7 +300,26 @@ export default function FloorPlan({
 
   const quietMap = !!status || editorLook;
 
-  const fit = useMemo<Vb>(() => sceneBounds(floor, stations), [floor, stations.length]);
+  const fit = useMemo<Vb>(() => {
+    const base = sceneBounds(floor, stations);
+    const hasOwn = (floor.outline?.length ?? 0) >= 3 || stations.length > 0;
+    const refs = referenceLevels.filter((r) => r.outline.length >= 3);
+    if (!refs.length) return base;
+    let x0 = hasOwn ? base.x : Infinity;
+    let y0 = hasOwn ? base.y : Infinity;
+    let x1 = hasOwn ? base.x + base.w : -Infinity;
+    let y1 = hasOwn ? base.y + base.h : -Infinity;
+    for (const r of refs) {
+      for (const [rx, ry] of r.outline) {
+        if (rx - 2 < x0) x0 = rx - 2;
+        if (ry - 2 < y0) y0 = ry - 2;
+        if (rx + 2 > x1) x1 = rx + 2;
+        if (ry + 2 > y1) y1 = ry + 2;
+      }
+    }
+    if (!Number.isFinite(x0)) return base;
+    return { x: x0, y: y0, w: Math.max(10, x1 - x0), h: Math.max(10, y1 - y0) };
+  }, [floor, stations.length, referenceLevels]);
   const [vb, setVb] = useState<Vb>(fit);
   const [userMoved, setUserMoved] = useState(false);
 
@@ -474,6 +506,14 @@ export default function FloorPlan({
     if (d.kind === "draft") {
       let x = snap(mx);
       let y = snap(my);
+      let refSnapKind: "vertex" | "edge" | null = null;
+      if (!e.altKey && referenceLevels.length > 0) {
+        const hit = snapToReferenceLevels([mx, my], referenceLevels, 12 * metersPerPx());
+        if (hit) {
+          [x, y] = hit.point;
+          refSnapKind = hit.kind;
+        }
+      }
       if (e.shiftKey && draft && draft.length >= 2) {
         const prev = draft[(d.idx - 1 + draft.length) % draft.length];
         if (Math.abs(x - prev[0]) >= Math.abs(y - prev[1])) y = prev[1];
@@ -481,7 +521,8 @@ export default function FloorPlan({
       }
       const p: [number, number] = [x, y];
       onDraftMove?.(d.idx, p);
-      setTip({ x: p[0], y: p[1] - 0.45, text: `${fmtNum(p[0])} · ${fmtNum(p[1])} m` });
+      const suffix = refSnapKind === "vertex" ? " · Ecke Nachbarebene" : refSnapKind === "edge" ? " · Kante Nachbarebene" : "";
+      setTip({ x: p[0], y: p[1] - 0.45, text: `${fmtNum(p[0])} · ${fmtNum(p[1])} m${suffix}` });
       return;
     }
     if (d.kind === "draft-indent") {
@@ -617,7 +658,7 @@ export default function FloorPlan({
   };
 
   // Zeigerposition für Gummiband und Rechteckvorschau.
-  const [cursorState, setCursorState] = useState<{ x: number; y: number; shift: boolean } | null>(null);
+  const [cursorState, setCursorState] = useState<{ x: number; y: number; shift: boolean; alt: boolean } | null>(null);
 
   // Einbuchtungs-Werkzeug auf geschlossenen Umrissen: Klick oder Ziehen auf einer Wand
   // stanzt sofort eine rechtwinklige 4-Punkt-Einbuchtung in die Wand.
@@ -628,7 +669,8 @@ export default function FloorPlan({
 
   /** Zeigerposition auf dem Meterraster (Fangweite):
       folgt direkt dem Mauszeiger ohne erzwungenen 90°-Achsensprung.
-      Magnet auf den Startpunkt P1 zum Schließen; optional Umschalt = horizontal/vertikal. */
+      Magnet auf den Startpunkt P1 zum Schließen sowie auf Ecken/Kanten anderer
+      Geschosse (Alt unterdrückt); optional Umschalt = horizontal/vertikal. */
   const displayCursor = useCallback((): [number, number] | null => {
     if (!cursorState) return null;
     let x = snap(cursorState.x);
@@ -639,11 +681,17 @@ export default function FloorPlan({
       if (anchorPts.length >= 3 && Math.hypot(cursorState.x - p0[0], cursorState.y - p0[1]) < 14 * metersPerPx()) {
         return p0;
       }
-      if (cursorState.shift) {
-        const last = anchorPts[anchorPts.length - 1];
-        if (Math.abs(x - last[0]) >= Math.abs(y - last[1])) y = last[1];
-        else x = last[0];
+    }
+    if (polygonMode && !cursorState.alt && referenceLevels.length > 0) {
+      const hit = snapToReferenceLevels([cursorState.x, cursorState.y], referenceLevels, 12 * metersPerPx());
+      if (hit) {
+        [x, y] = hit.point;
       }
+    }
+    if (anchorPts?.length && cursorState.shift) {
+      const last = anchorPts[anchorPts.length - 1];
+      if (Math.abs(x - last[0]) >= Math.abs(y - last[1])) y = last[1];
+      else x = last[0];
     }
     if (aisleMode && cursorState.shift && aisleAnchor != null) {
       const a = floor.aisles?.nodes?.[aisleAnchor];
@@ -653,7 +701,7 @@ export default function FloorPlan({
       }
     }
     return [x, y];
-  }, [cursorState, snap, polygonMode, draft, metersPerPx, aisleMode, aisleAnchor, floor.aisles]);
+  }, [cursorState, snap, polygonMode, draft, metersPerPx, aisleMode, aisleAnchor, floor.aisles, referenceLevels]);
 
   const onBgPointerMove = (e: React.PointerEvent) => {
     if (dragRef.current) { applyDrag(e); return; }
@@ -670,7 +718,7 @@ export default function FloorPlan({
     }
     if (drawing) {
       const [mx, my] = toMeter(e.clientX, e.clientY);
-      setCursorState({ x: mx, y: my, shift: e.shiftKey });
+      setCursorState({ x: mx, y: my, shift: e.shiftKey, alt: e.altKey });
     }
   };
 
@@ -1054,6 +1102,47 @@ export default function FloorPlan({
             ))}
           </g>
 
+          {/* Andere Geschosse derselben Halle als Zeichen- und Fanghilfe (unter Zonen, außer im Umriss-Modus). */}
+          {referenceLevels.length > 0 && layer !== "outline" && (
+            <g className="floor-ref-levels" pointerEvents="none">
+              {referenceLevels.map((ref) => {
+                if (ref.outline.length < 3) return null;
+                const isAbove = ref.level > (floor.level ?? 0);
+                const stroke = isAbove ? "#6366f1" : "var(--gimel-accent, #0b7a67)";
+                const [cx, cy] = polygonCentroid(ref.outline);
+                const refLabelSize = labelSize(0.42, 11, 8);
+                return (
+                  <g key={`ref-${ref.id}`}>
+                    <path
+                      d={outlinePath(ref.outline)}
+                      fill={stroke}
+                      fillOpacity={0.035}
+                      stroke={stroke}
+                      strokeOpacity={0.55}
+                      strokeWidth={1.4}
+                      strokeDasharray={isAbove ? "6 4" : "4 3"}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    {refLabelSize != null && (
+                      <text
+                        x={cx}
+                        y={cy}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={refLabelSize}
+                        fill={stroke}
+                        fillOpacity={0.7}
+                        fontWeight={600}
+                      >
+                        {ref.label}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+          )}
+
           {/* Zonen — unter allem, sie sind Hintergrund. */}
           {vis.zones && (floor.zones ?? []).map((z, i) => (
             i === editingZoneIdx ? null : (
@@ -1319,6 +1408,59 @@ export default function FloorPlan({
                 ins Innere niemals blockiert werden!
               - Sobald draftClosed: Geschlossenes Polygon mit Wand-Schieben, [⊔]-Einbuchtungs-Griffen,
                 (+)-Wandteilern und Eckgriffen. */}
+          {/* Im Umriss-Modus liegen Nachbarebenen über Zonen & Gängen, damit man sie beim Zeichnen immer klar sieht. */}
+          {referenceLevels.length > 0 && layer === "outline" && (
+            <g className="floor-ref-levels floor-ref-levels--top" pointerEvents="none">
+              {referenceLevels.map((ref) => {
+                if (ref.outline.length < 3) return null;
+                const isAbove = ref.level > (floor.level ?? 0);
+                const stroke = isAbove ? "#6366f1" : "var(--gimel-accent, #0b7a67)";
+                const [cx, cy] = polygonCentroid(ref.outline);
+                const refLabelSize = labelSize(0.42, 11, 8);
+                return (
+                  <g key={`ref-top-${ref.id}`}>
+                    <path
+                      d={outlinePath(ref.outline)}
+                      fill={stroke}
+                      fillOpacity={0.04}
+                      stroke={stroke}
+                      strokeOpacity={0.82}
+                      strokeWidth={1.8}
+                      strokeDasharray={isAbove ? "7 4" : "5 3"}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    {ref.outline.map(([rx, ry], idx) => (
+                      <circle
+                        key={`ref-top-pt-${ref.id}-${idx}`}
+                        cx={rx}
+                        cy={ry}
+                        r={Math.max(0.16, 3.6 * metersPerPx())}
+                        fill="none"
+                        stroke={stroke}
+                        strokeOpacity={0.85}
+                        strokeWidth={1.3}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ))}
+                    {refLabelSize != null && (
+                      <text
+                        x={cx}
+                        y={cy}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={refLabelSize}
+                        fill={stroke}
+                        fillOpacity={0.88}
+                        fontWeight={700}
+                      >
+                        {ref.label}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+          )}
           {polygonMode && draft && draft.length > 0 && (() => {
             const hitHalf = Math.max(0.18, fs(13));
             const visHalf = Math.max(0.11, fs(5.5));
